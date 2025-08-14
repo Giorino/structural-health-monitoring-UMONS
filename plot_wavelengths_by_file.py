@@ -140,6 +140,11 @@ def main() -> None:
         default=8000,
         help="Downsample each series to at most this many points for plotting (default 8000).",
     )
+    parser.add_argument(
+        "--delta",
+        action="store_true",
+        help="Plot delta wavelength (subtract per-channel baseline) instead of absolute.",
+    )
     args = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -193,17 +198,25 @@ def main() -> None:
         colors = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["#1f77b4", "#ff7f0e", "#2ca02c"])        
         for i, col in enumerate(wl_cols):
             y = pd.to_numeric(df[col], errors="coerce").to_numpy(dtype=float)
+            if args.delta:
+                finite_mask = np.isfinite(y)
+                if finite_mask.any():
+                    baseline = y[finite_mask][0]
+                    y = y - baseline
             xs, ys = downsample_for_plot(x, y, max_points=args.max_points)
             ax.plot(xs, ys, linewidth=0.8, label=col, color=colors[i % len(colors)])
 
         title = os.path.basename(path)
         ax.set_title(title, fontsize=11)
-        ax.set_ylabel("Wavelength (nm)")
+        ax.set_ylabel("Delta wavelength (nm)" if args.delta else "Wavelength (nm)")
         ax.grid(True, linestyle=":", linewidth=0.6, alpha=0.7)
         ax.legend(fontsize=8, loc="best")
 
     axes[-1].set_xlabel(x_label)
-    fig.suptitle("Wavelength vs Time per Interrogator File", fontsize=14)
+    suptitle = (
+        "Delta Wavelength vs Time per Interrogator File" if args.delta else "Wavelength vs Time per Interrogator File"
+    )
+    fig.suptitle(suptitle, fontsize=14)
     fig.tight_layout(rect=[0, 0, 1, 0.98])
 
     out_path = os.path.join(input_dir, "wavelengths_by_file.png")
