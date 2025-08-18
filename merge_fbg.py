@@ -3,7 +3,7 @@ import re
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from scipy.signal import medfilt
+from scipy.signal import medfilt, find_peaks
 import argparse
 from datetime import datetime
 
@@ -96,40 +96,34 @@ def smooth_signal(signal, kernel_size=7):
     k = kernel_size if kernel_size % 2 == 1 else kernel_size + 1
     return medfilt(signal, kernel_size=k)
 
-def detect_segments(signal, diff_threshold=None, min_segment_length=5):
-    # signal: 1D array (smoothed mean of chosen WL columns)
-    grad = np.abs(np.gradient(signal))
-    # threshold: if not provided use multiple of median noise
-    if diff_threshold is None:
-        diff_threshold = max(1e-6, np.median(grad) + 3 * np.std(grad))
-    is_jump = grad > diff_threshold
-    # turn points into boundaries (where jump is True). We'll group contiguous "not jump" areas as segments.
-    boundaries = np.where(is_jump)[0]
-    # build segments between boundaries
+def detect_segments(signal, peak_height=None, min_segment_length=5, peak_distance=20, peak_prominence=0.1):
+    """Detect segments by finding peaks in the signal."""
+    if peak_height is None:
+        # Auto-threshold if not provided
+        noise_level = np.median(np.abs(signal - np.median(signal)))  # Median Absolute Deviation
+        peak_height = max(0.05, 4 * 1.4826 * noise_level)  # 4-sigma heuristic
+
+    peaks, properties = find_peaks(
+        signal, height=peak_height, width=min_segment_length, distance=peak_distance, prominence=peak_prominence
+    )
+
+    if len(peaks) == 0:
+        return [], peak_height
+
+    # Use peak boundaries (left_ips, right_ips) as segment start/end
+    # These are calculated at half the peak's prominence
+    left_edges = np.floor(properties["left_ips"]).astype(int)
+    right_edges = np.ceil(properties["right_ips"]).astype(int)
+
     segments = []
-    start = 0
-    for b in boundaries:
-        end = b  # segment up to b
-        if end - start >= min_segment_length:
-            segments.append((start, end))
-        start = b + 1
-    # final segment
-    if len(signal) - start >= min_segment_length:
-        segments.append((start, len(signal)-1))
-    # merge segments that are very small with neighbors
-    merged = []
-    for s in segments:
-        if not merged:
-            merged.append(list(s))
-        else:
-            prev = merged[-1]
-            if s[0] - prev[1] <= 2:  # gap tiny -> merge
-                merged[-1][1] = s[1]
-            else:
-                merged.append(list(s))
-    # convert back to tuples
-    merged = [(int(a), int(b)) for a,b in merged]
-    return merged, diff_threshold
+    for l, r in zip(left_edges, right_edges):
+        if r > l + min_segment_length:
+            segments.append((l, r))
+    
+    # Sort segments by start time
+    segments.sort(key=lambda x: x[0])
+    return segments, peak_height
+
 
 def summarize_segments(df, wl_cols, segments):
     summaries = []
@@ -140,7 +134,8 @@ def summarize_segments(df, wl_cols, segments):
         stats['end_idx'] = e
         stats['n_samples'] = len(block)
         for c in wl_cols:
-            stats[f'{c}_mean'] = block[c].mean()
+            # Use median to be robust to outliers/dropouts
+            stats[f'{c}_median'] = block[c].median()
             stats[f'{c}_std']  = block[c].std()
         summaries.append(stats)
     return pd.DataFrame(summaries)
@@ -159,11 +154,11 @@ def merge_with_metadata(meta_df, seg_summary, repeats_per_pressure=10, verbose=T
         agg = {}
         agg['group_index'] = i
         # aggregate all WL stats by mean/std across repetitions
-        wl_mean_cols = [c for c in seg_summary.columns if c.endswith('_mean')]
+        wl_median_cols = [c for c in seg_summary.columns if c.endswith('_median')]
         wl_std_cols  = [c for c in seg_summary.columns if c.endswith('_std')]
-        for c in wl_mean_cols:
-            agg[f'{c}_mean'] = group[c].mean()
-            agg[f'{c}_std']  = group[c].mean() if False else group[c].std()  # std of repetition means
+        for c in wl_median_cols:
+            agg[f'{c}_mean_of_medians'] = group[c].mean()
+            agg[f'{c}_std_of_medians']  = group[c].std()
         # also keep count
         agg['n_reps_found'] = len(group)
         groups.append(agg)
@@ -233,7 +228,7 @@ def merge_per_repetition(
                     out['timestamp'] = np.nan
             # per-channel wavelengths (mean and std from segment summary)
             for i, c in enumerate(wl_cols_to_export, start=1):
-                out[f'WL_ch{i}'] = seg.get(f'{c}_mean', np.nan)
+                out[f'WL_ch{i}'] = seg.get(f'{c}_median', np.nan)
                 if include_std:
                     out[f'WL_ch{i}_std'] = seg.get(f'{c}_std', np.nan)
 
@@ -262,6 +257,13 @@ def main(args):
         raise RuntimeError("No wavelength (WL) columns detected. Columns found: " + ", ".join(df.columns))
     print("Detected WL columns:", wl_cols)
 
+    if not args.absolute_wavelength:
+        print("Calculating wavelength shifts relative to first measurement...")
+        for col in wl_cols:
+            if pd.api.types.is_numeric_dtype(df[col]):
+                first_valid = df[col].dropna().iloc[0] if not df[col].dropna().empty else 0
+                df[col] = df[col] - first_valid
+    
     # choose a representative signal to detect transitions
     # Options: mean of all WL cols, or the single channel with maximum variance
     if args.rep_signal_mode == 'maxvar':
@@ -273,8 +275,14 @@ def main(args):
     sm = smooth_signal(rep_signal, kernel_size=args.smooth_kernel)
 
     print("Detecting segments (repetitions)...")
-    segments, used_thr = detect_segments(sm, diff_threshold=args.diff_threshold, min_segment_length=args.min_segment_length)
-    print(f"Used derivative threshold = {used_thr:.6g}. Found {len(segments)} segments")
+    segments, used_thr = detect_segments(
+        sm,
+        peak_height=args.peak_height,
+        min_segment_length=args.min_segment_length,
+        peak_distance=args.peak_distance,
+        peak_prominence=args.peak_prominence,
+    )
+    print(f"Used peak height threshold = {used_thr:.6g}. Found {len(segments)} segments")
 
     seg_summary = summarize_segments(df, wl_cols, segments)
     print("Segment summary head:")
@@ -377,12 +385,15 @@ if __name__ == "__main__":
     parser.add_argument("--out", default="merged_fbg.csv", help="output csv file")
     parser.add_argument("--repeats_per_pressure", type=int, default=10, help="how many repetition segments per pressure (default 10)")
     parser.add_argument("--smooth_kernel", type=int, default=7, help="median smoothing kernel size (odd, default 7)")
-    parser.add_argument("--diff_threshold", type=float, default=None, help="derivative threshold for change detection (auto if None)")
+    parser.add_argument("--peak_height", type=float, default=None, help="peak height threshold for segment detection (auto if None)")
     parser.add_argument("--min_segment_length", type=int, default=5, help="minimum number of samples in a repetition segment")
+    parser.add_argument("--peak_distance", type=int, default=20, help="minimum horizontal distance between peaks")
+    parser.add_argument("--peak_prominence", type=float, default=0.1, help="minimum prominence of peaks")
     parser.add_argument("--output_mode", choices=["group", "repetition"], default="repetition", help="output aggregation: group (group-of-repetitions per meta row) or repetition (one row per repetition)")
     parser.add_argument("--channels_to_use", type=int, default=3, help="number of WL channels to include (from left to right)")
     parser.add_argument("--include_std", action="store_true", help="include per-channel std columns alongside mean")
     parser.add_argument("--timestamp_point", choices=["start", "mid", "end"], default="mid", help="which segment timestamp to export")
     parser.add_argument("--rep_signal_mode", choices=["mean", "maxvar"], default="mean", help="how to build representative signal for segmentation")
+    parser.add_argument("--absolute_wavelength", action="store_true", help="if set, use absolute WL values instead of shifts from initial value")
     args = parser.parse_args()
     main(args)

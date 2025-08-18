@@ -286,8 +286,8 @@ def plot_time_series(
             # Remove leading 'merged_'
             if base.startswith("merged_"):
                 base = base[len("merged_"):]
-            # Keep up to the pattern like '12layers-1' (or generally '<num>layers-<num>')
-            m = re.search(r"(\d+layers-\d+)", base)
+            # Keep up to the pattern like '11cm-12layers-1'
+            m = re.search(r"(\d+cm-\d+layers-\d+)", base)
             if m:
                 base = base[: m.end()]
             else:
