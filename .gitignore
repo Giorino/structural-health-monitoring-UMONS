@@ -38,6 +38,7 @@ htmlcov/
 # Project-specific generated outputs (keep data and sources tracked)
 output/
 psd_output/
+strain_wavelength_analysis_plots/
 
 # Large media typically generated as outputs
 *.mp4
