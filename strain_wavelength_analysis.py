@@ -53,7 +53,7 @@ def plot_strain_vs_wavelength_by_distance(csv_path, output_dir='strain_wavelengt
                 
                 # Zoom in on the y-axis
                 y_min, y_max = wavelength.min(), wavelength.max()
-                y_padding = (y_max - y_min) * 0.1
+                y_padding = (y_max - y_min) * 0.05  # Zoom in more
                 ax.set_ylim(y_min - y_padding, y_max + y_padding)
 
             ax.set_ylabel('Bragg Wavelength [nm]')
@@ -64,20 +64,26 @@ def plot_strain_vs_wavelength_by_distance(csv_path, output_dir='strain_wavelengt
         axes[-1].set_xlabel('Strain [με]')
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         
-        output_filename = os.path.join(output_dir, f'strain_vs_wavelength_{distance}cm_zoomed.png')
+        output_filename = os.path.join(output_dir, f'strain_vs_wavelength_{distance}cm.png')
         plt.savefig(output_filename)
         plt.close()
 
-    print(f"Generated {len(distances)} zoomed plots in {output_dir}")
+    print(f"Generated {len(distances)} plots in {output_dir}")
 
-# Find the latest output folder
-latest_folder = find_latest_output_folder()
+def main():
+    """Main function to find the latest results and generate plots."""
+    latest_folder = find_latest_output_folder()
 
-if latest_folder:
-    csv_file_path = os.path.join(latest_folder, 'strain_analysis_results.csv')
-    if os.path.exists(csv_file_path):
-        plot_strain_vs_wavelength_by_distance(csv_file_path)
+    if latest_folder:
+        csv_file_path = os.path.join(latest_folder, 'strain_analysis_results.csv')
+        if os.path.exists(csv_file_path):
+            output_dir = 'strain_wavelength_analysis_plots'
+            os.makedirs(output_dir, exist_ok=True)
+            plot_strain_vs_wavelength_by_distance(csv_file_path, output_dir)
+        else:
+            print(f"Error: 'strain_analysis_results.csv' not found in {latest_folder}")
     else:
-        print(f"Error: 'strain_analysis_results.csv' not found in {latest_folder}")
-else:
-    print("Error: No output folder found.")
+        print("Error: No output folder found.")
+
+if __name__ == '__main__':
+    main()

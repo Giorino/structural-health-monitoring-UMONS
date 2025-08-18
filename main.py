@@ -48,9 +48,21 @@ def run_pipeline() -> None:
     saved_plot = pts.plot_time_series(df, latest_dir)
     print(f"Saved time-series figure: {saved_plot}")
 
-    # 3) Build multi force–displacement video using the same directory
-    print("[3/3] Creating multi force–displacement video ...")
+    # 3) Calculate strain
+    print("[3/4] Calculating strain ...")
+    import calculate_strain as cs
+    cs.process_directory(latest_dir)
+
+    # 4) Build multi force–displacement video using the same directory
+    print("[4/5] Creating multi force–displacement video ...")
+    import multi_force_displacement_video as mfd
     mfd.create_multi_force_displacement_video(latest_dir)
+    
+    # 5) Run strain wavelength analysis
+    print("[5/5] Running strain wavelength analysis ...")
+    import strain_wavelength_analysis as swa
+    swa.main()
+
     print("Pipeline completed.")
 
 
