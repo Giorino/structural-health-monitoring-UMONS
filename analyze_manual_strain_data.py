@@ -113,6 +113,23 @@ def analyze_manual_strain_data():
             ax.plot(reverse_data['Strain_corrected_microstrain'], reverse_data[delta_channel], 
                    color=colors[1], alpha=0.5, linestyle='--')
         
+        # Combined data for linear fit
+        combined_data = pd.concat([forward_data, reverse_data])
+        if len(combined_data) > 1:
+            x_all = combined_data['Strain_corrected_microstrain']
+            y_all = combined_data[delta_channel]
+            
+            coef = np.polyfit(x_all, y_all, 1)
+            poly1d_fn = np.poly1d(coef)
+            sensitivity = coef[0] * 1000  # pm/με
+            
+            # Generate x values for plotting the fit line
+            x_fit = np.linspace(x_all.min(), x_all.max(), 100)
+            y_fit = poly1d_fn(x_fit)
+            
+            ax.plot(x_fit, y_fit, color='purple', linestyle='-.', lw=2,
+                    label=f'Linear Fit ({sensitivity:.3f} pm/με)')
+
         ax.set_xlabel('Strain [με]')
         ax.set_ylabel('Δλ [nm]')
         ax.set_title(f'{name} - Delta Wavelength vs Strain')
