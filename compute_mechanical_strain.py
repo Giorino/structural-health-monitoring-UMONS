@@ -74,7 +74,7 @@ def compute_mechanical_strain(df: pd.DataFrame) -> pd.Series:
     b_m = 34.0e-3      # width in meters (34 mm)
     h_m = 4.0e-3       # thickness in meters (4 mm)
     y_m = 1.45e-3      # neutral axis distance in meters (1.45 mm)
-    E_pa = 20.0e9      # Young's modulus in Pa (20 GPa)
+    E_pa = 22.0e9      # Young's modulus in Pa (20 GPa)
 
     # Second moment of area for rectangular cross-section
     I_m4 = (b_m * (h_m ** 3)) / 12.0
