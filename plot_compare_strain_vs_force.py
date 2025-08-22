@@ -10,6 +10,7 @@ import math
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from compute_mechanical_strain import compute_mechanical_strain as compute_mech
 
 
 def find_latest_output_directory(base_dir: Optional[str] = None) -> Optional[str]:
@@ -86,13 +87,6 @@ def _plot_by_distance_small_multiples(df: pd.DataFrame, latest_dir: str) -> str:
     if not dists:
         return ""
 
-    # Constants for mechanical line
-    b_m = 34.0e-3
-    h_m = 4.0e-3
-    y_m = 1.45e-3
-    E_pa = 20.0e9
-    I_m4 = (b_m * (h_m ** 3)) / 12.0
-
     # Compute global y limits across all facets
     ymins, ymaxs = [], []
     for dist in dists:
@@ -100,17 +94,16 @@ def _plot_by_distance_small_multiples(df: pd.DataFrame, latest_dir: str) -> str:
         sub = df[df["source_file"].isin(files_here)]
         force = pd.to_numeric(sub.get("Force (N)"), errors="coerce")
         fbg = pd.to_numeric(sub.get("fbg_direct_strain [\u03bcu\u03b5]"), errors="coerce")
+        mech = pd.to_numeric(sub.get("mechanical_strain [\u03bcu\u03b5]"), errors="coerce")
         valid = ~(force.isna() | fbg.isna())
         if valid.any():
             ymins.append(float(fbg[valid].min()))
             ymaxs.append(float(fbg[valid].max()))
-        # mechanical line at force range
-        if not force.dropna().empty:
-            L = dist / 100.0
-            slope_micro_per_N = (L * y_m) / (4.0 * E_pa * I_m4) * 1e6
-            fmin, fmax = float(force.min()), float(force.max())
-            ymins.append(slope_micro_per_N * fmin)
-            ymaxs.append(slope_micro_per_N * fmax)
+        # mechanical series range
+        valid_mech = ~(force.isna() | mech.isna())
+        if valid_mech.any():
+            ymins.append(float(mech[valid_mech].min()))
+            ymaxs.append(float(mech[valid_mech].max()))
     if not ymins:
         y_min, y_max = 0.0, 1.0
     else:
@@ -135,6 +128,7 @@ def _plot_by_distance_small_multiples(df: pd.DataFrame, latest_dir: str) -> str:
         sub = df[df["source_file"].isin(files_here)].copy()
         force = pd.to_numeric(sub.get("Force (N)"), errors="coerce")
         fbg = pd.to_numeric(sub.get("fbg_direct_strain [\u03bcu\u03b5]"), errors="coerce")
+        mech = pd.to_numeric(sub.get("mechanical_strain [\u03bcu\u03b5]"), errors="coerce")
         mask = ~(force.isna() | fbg.isna())
 
         # Scatter FBG
@@ -154,14 +148,28 @@ def _plot_by_distance_small_multiples(df: pd.DataFrame, latest_dir: str) -> str:
             r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
             ax.plot(xline, yline, color=color, linewidth=1.8, label=f"FBG fit (R²={r2:.2f})")
 
-        # Mechanical theoretical line
-        if not force.dropna().empty:
-            L = dist / 100.0
-            slope_micro_per_N = (L * y_m) / (4.0 * E_pa * I_m4) * 1e6
-            fmin, fmax = float(force.min()), float(force.max())
+        # Mechanical line fit from recomputed mechanical strain (reflects current E in compute_mechanical_strain)
+        mask_mech = ~(force.isna() | mech.isna())
+        if mask_mech.sum() >= 2:
+            x_m = force[mask_mech].values
+            y_m = mech[mask_mech].values
+            slope_m, intercept_m = np.polyfit(x_m, y_m, deg=1)
+            fmin, fmax = float(np.nanmin(x_m)), float(np.nanmax(x_m))
             xline = np.array([fmin, fmax])
-            yline = slope_micro_per_N * xline
-            ax.plot(xline, yline, color=color, linestyle="--", linewidth=1.6, label="Mechanical (P·L·y/4EI)")
+            yline = slope_m * xline + intercept_m
+            # Difference metrics using paired samples
+            mask_both = ~(force.isna() | fbg.isna() | mech.isna())
+            x_pts = force[mask_both].values.astype(float)
+            y_fbg_pts = fbg[mask_both].values.astype(float)
+            y_mech_pts = mech[mask_both].values.astype(float)
+            diffs = y_mech_pts - y_fbg_pts
+            mean_diff = float(np.nanmean(diffs)) if diffs.size > 0 else float('nan')
+            denom = np.maximum(np.abs(y_fbg_pts), 1e-9)
+            mape = float(np.nanmean(np.abs(diffs) / denom) * 100.0) if diffs.size > 0 else float('nan')
+            sign = "+" if mean_diff >= 0 else ""
+            diff_label_extra = f", Δmean={sign}{mean_diff:.0f} με, MAPE={mape:.1f}%"
+            ax.plot(xline, yline, color=color, linestyle="--", linewidth=1.6,
+                    label=f"Mechanical (P·L·y/4EI){diff_label_extra}")
 
         ax.set_title(f"{int(dist)} cm span")
         ax.set_xlabel("Force (N)")
@@ -194,24 +202,12 @@ def main(base_output_dir: Optional[str] = None) -> None:
 
     df = load_and_merge_csvs(csv_files)
 
-    # Load computed strains (if the user ran compute scripts), otherwise compute inline
-    fbg_csv = os.path.join(latest_dir, "fbg_direct_strain.csv")
-    mech_csv = os.path.join(latest_dir, "mechanical_strain.csv")
+    # Always compute FBG and mechanical strain inline to reflect current constants and avoid stale CSVs
+    from compute_fbg_direct_strain import compute_fbg_direct_microstrain_for_df
+    fbg_series, _ = compute_fbg_direct_microstrain_for_df(df)
+    df["fbg_direct_strain [\u03bcu\u03b5]"] = fbg_series
 
-    if os.path.isfile(fbg_csv):
-        fbg_df = pd.read_csv(fbg_csv)
-        df["fbg_direct_strain [\u03bcu\u03b5]"] = fbg_df["fbg_direct_strain [\u03bcu\u03b5]"]
-    else:
-        from compute_fbg_direct_strain import compute_fbg_direct_microstrain_for_df
-        fbg_series, _ = compute_fbg_direct_microstrain_for_df(df)
-        df["fbg_direct_strain [\u03bcu\u03b5]"] = fbg_series
-
-    if os.path.isfile(mech_csv):
-        mech_df = pd.read_csv(mech_csv)
-        df["mechanical_strain [\u03bcu\u03b5]"] = mech_df["mechanical_strain [\u03bcu\u03b5]"]
-    else:
-        from compute_mechanical_strain import compute_mechanical_strain
-        df["mechanical_strain [\u03bcu\u03b5]"] = compute_mechanical_strain(df)
+    df["mechanical_strain [\u03bcu\u03b5]"] = compute_mech(df)
 
     # Inputs
     force = pd.to_numeric(df.get("Force (N)"), errors="coerce")
@@ -231,59 +227,7 @@ def main(base_output_dir: Optional[str] = None) -> None:
     cmap = plt.get_cmap('tab20', max(2, len(ordered_keys)))
     color_by_key = {k: cmap(i) for i, k in enumerate(ordered_keys)}
 
-    # Plot
-    plt.figure(figsize=(14, 10))
-    # Plot per file to avoid zigzagging across discontinuities
-    for name, group in df.groupby("source_file", sort=False):
-        base_key = _derive_base_key_from_merged_filename(str(name)) or os.path.splitext(str(name))[0]
-        color = color_by_key.get(base_key, None)
-        mask_fbg = ~(group["Force (N)"].isna() | group["fbg_direct_strain [\u03bcu\u03b5]"].isna())
-        if mask_fbg.sum() > 1:
-            plt.plot(
-                group.loc[mask_fbg, "Force (N)"],
-                group.loc[mask_fbg, "fbg_direct_strain [\u03bcu\u03b5]"],
-                label=f"FBG Δλ/λ0 ({base_key})",
-                alpha=0.9,
-                linewidth=1.6,
-                color=color,
-                linestyle='-'
-            )
-
-        mask_mech = ~(group["Force (N)"].isna() | group["mechanical_strain [\u03bcu\u03b5]"].isna())
-        if mask_mech.sum() > 1:
-            plt.plot(
-                group.loc[mask_mech, "Force (N)"],
-                group.loc[mask_mech, "mechanical_strain [\u03bcu\u03b5]"],
-                label=f"Mechanical (P·L·y/4EI) ({base_key})",
-                linestyle='--',
-                alpha=0.9,
-                linewidth=1.6,
-                color=color
-            )
-
-    plt.xlabel("Force (N)")
-    plt.ylabel("Strain [\u03bcu\u03b5]")
-    plt.title("Strain vs Force: FBG Δλ/λ0 vs Mechanical")
-    plt.grid(True, linestyle=":", alpha=0.7)
-    plt.legend(
-        fontsize=6,
-        ncol=3,
-        handlelength=2.0,
-        labelspacing=0.25,
-        borderpad=0.2,
-        columnspacing=0.6,
-        frameon=True,
-        framealpha=0.8,
-        loc="upper left",
-        bbox_to_anchor=(1.02, 1.0),
-    )
-    out_path = os.path.join(latest_dir, "strain_vs_force_comparison.png")
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=300, bbox_inches="tight")
-    plt.close()
-    print(f"Saved: {out_path}")
-
-    # Also create a clearer faceted plot by distance
+    # Create the faceted plot by distance (only plot we now produce)
     try:
         out_facet = _plot_by_distance_small_multiples(df, latest_dir)
         if out_facet:

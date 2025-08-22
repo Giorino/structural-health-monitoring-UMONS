@@ -67,7 +67,7 @@ def run_pipeline() -> None:
     pfsd.main(output_base_dir)
 
     # 4b) Plot strain vs force comparison (FBG Δλ/λ0 vs Mechanical)
-    print("[4b/6] Plotting strain vs force comparison (FBG vs Mechanical) ...")
+    print("[4b/6] Plotting strain vs force by distance (FBG vs Mechanical) ...")
     import plot_compare_strain_vs_force as pcsf
     try:
         pcsf.main(output_base_dir)
