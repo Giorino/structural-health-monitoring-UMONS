@@ -66,6 +66,14 @@ def run_pipeline() -> None:
     import plot_force_strain_displacement as pfsd
     pfsd.main(output_base_dir)
 
+    # 4b) Plot strain vs force comparison (FBG Δλ/λ0 vs Mechanical)
+    print("[4b/6] Plotting strain vs force comparison (FBG vs Mechanical) ...")
+    import plot_compare_strain_vs_force as pcsf
+    try:
+        pcsf.main(output_base_dir)
+    except Exception as e:
+        print(f"Skipping comparison plot due to error: {e}")
+
     # 5) Generate interactive 3D force–displacement–strain visualization
     print("[5/6] Generating interactive 3D plot ...")
     import plot_3d_force_displacement_strain as p3d
