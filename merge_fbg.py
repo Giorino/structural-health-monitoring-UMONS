@@ -335,8 +335,10 @@ def main(args):
         if str(resolved_sheet) != str(args.sheet):
             print(f"Info: resolved sheet '{args.sheet}' -> '{resolved_sheet}'")
     meta = pd.read_excel(xlsx_path, sheet_name=resolved_sheet)
-    # Forward-fill metadata so repeated fields (e.g., Layers, Distance) are populated for all pressures
-    meta = meta.ffill()
+    # Forward-fill metadata selectively - fill structural fields but preserve original Crack values
+    columns_to_ffill = [col for col in meta.columns if col.lower() not in ['crack']]
+    meta[columns_to_ffill] = meta[columns_to_ffill].ffill()
+    # Keep Crack column as-is (no forward-fill) so it only appears where explicitly specified
     print("Metadata columns:", list(meta.columns))
     # Output mode
     time_col = find_time_column(df)
