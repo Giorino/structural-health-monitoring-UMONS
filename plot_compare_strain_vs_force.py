@@ -87,31 +87,7 @@ def _plot_by_distance_small_multiples(df: pd.DataFrame, latest_dir: str) -> str:
     if not dists:
         return ""
 
-    # Compute global y limits across all facets
-    ymins, ymaxs = [], []
-    for dist in dists:
-        files_here = [f for f, d in file_to_dist.items() if d == dist]
-        sub = df[df["source_file"].isin(files_here)]
-        force = pd.to_numeric(sub.get("Force (N)"), errors="coerce")
-        fbg = pd.to_numeric(sub.get("fbg_direct_strain [\u03bcu\u03b5]"), errors="coerce")
-        mech = pd.to_numeric(sub.get("mechanical_strain [\u03bcu\u03b5]"), errors="coerce")
-        valid = ~(force.isna() | fbg.isna())
-        if valid.any():
-            ymins.append(float(fbg[valid].min()))
-            ymaxs.append(float(fbg[valid].max()))
-        # mechanical series range
-        valid_mech = ~(force.isna() | mech.isna())
-        if valid_mech.any():
-            ymins.append(float(mech[valid_mech].min()))
-            ymaxs.append(float(mech[valid_mech].max()))
-    if not ymins:
-        y_min, y_max = 0.0, 1.0
-    else:
-        y_min, y_max = min(ymins), max(ymins + ymaxs)
-    # make some padding
-    pad = 0.05 * (y_max - y_min if y_max > y_min else 1.0)
-    y_min -= pad
-    y_max += pad
+    # No longer computing global y limits - will use individual scaling per subplot
 
     # Layout
     n = len(dists)
@@ -175,7 +151,26 @@ def _plot_by_distance_small_multiples(df: pd.DataFrame, latest_dir: str) -> str:
         ax.set_xlabel("Force (N)")
         ax.set_ylabel("Strain [\u03bcu\u03b5]")
         ax.grid(True, linestyle=":", alpha=0.6)
-        ax.set_ylim(y_min, y_max)
+        
+        # Dynamic y-axis scaling for each subplot
+        all_y_values = []
+        if mask.any():
+            all_y_values.extend(fbg[mask].dropna())
+        if mask_mech.any():
+            all_y_values.extend(mech[mask_mech].dropna())
+        
+        if all_y_values:
+            y_min_local = float(min(all_y_values))
+            y_max_local = float(max(all_y_values))
+            # Add 10% padding to the range
+            y_range = y_max_local - y_min_local
+            if y_range > 0:
+                pad_local = 0.1 * y_range
+                ax.set_ylim(y_min_local - pad_local, y_max_local + pad_local)
+            else:
+                # If all values are the same, center around the value with some padding
+                ax.set_ylim(y_min_local - 50, y_max_local + 50)
+        
         ax.legend(fontsize=7, frameon=True, framealpha=0.85, loc="upper left")
 
     # Hide any empty axes
