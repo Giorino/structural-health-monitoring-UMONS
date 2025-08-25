@@ -43,48 +43,76 @@ def select_wl_channels(df: pd.DataFrame, wl_cols: List[str], channels_to_use: in
 def load_interrogator(txt_path: str) -> pd.DataFrame:
     """Robust TXT loader similar to merge_fbg.load_interrogator (no SciPy dep)."""
     path = str(txt_path)
-    with open(path, "r", encoding="utf-8", errors="ignore") as f:
-        lines = f.read().splitlines()
-
+    
+    # Optimized: Read only first few lines to detect structure
     iso_re = re.compile(r"^\d{4}-\d{2}-\d{2}T")
     data_start = 0
-    for i, line in enumerate(lines[:50]):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        parts = stripped.split()
-        if iso_re.match(stripped):
-            if len(parts) >= 3:
-                data_start = i
+    first_tokens = []
+    
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        for i, line in enumerate(f):
+            if i >= 50:  # Don't scan beyond first 50 lines
                 break
-        else:
-            try:
-                float(parts[0])
-                if len(parts) >= 2:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            parts = stripped.split()
+            if iso_re.match(stripped):
+                if len(parts) >= 3:
                     data_start = i
+                    first_tokens = parts
                     break
-            except Exception:
-                pass
+            else:
+                try:
+                    float(parts[0])
+                    if len(parts) >= 2:
+                        data_start = i
+                        first_tokens = parts
+                        break
+                except Exception:
+                    pass
 
-    first_tokens = lines[data_start].split()
     n_tokens = len(first_tokens)
-    if re.match(r"^\d{4}-\d{2}-\d{2}T", lines[data_start]):
+    # Limit to first 5 columns maximum as requested by user
+    n_tokens = min(n_tokens, 5)
+    
+    if iso_re.match(' '.join(first_tokens)):
         names = ["Timestamp", "Time_s"]
         wl_count = max(0, n_tokens - 2)
     else:
         names = ["Time_s"]
         wl_count = max(0, n_tokens - 1)
     names += [f"WL {i}[nm]" for i in range(1, wl_count + 1)]
+    
+    # Limit names to what we actually want to read
+    names_to_use = names[:n_tokens]
 
-    df = pd.read_csv(
-        path,
-        sep=r"\s+",
-        header=None,
-        names=names,
-        skiprows=data_start,
-        engine="python",
-    )
-    if "Timestamp" in df.columns:
+    try:
+        # Try C engine first (faster)
+        df = pd.read_csv(
+            path,
+            sep=r"\s+",
+            header=None,
+            names=names_to_use,
+            skiprows=data_start,
+            engine="c",
+            usecols=list(range(n_tokens)),  # Only read first n_tokens columns
+            on_bad_lines='skip'  # Skip lines with incorrect field counts
+        )
+    except Exception:
+        # Fallback to python engine with error handling
+        df = pd.read_csv(
+            path,
+            sep=r"\s+",
+            header=None,
+            names=names_to_use,
+            skiprows=data_start,
+            engine="python",
+            usecols=list(range(n_tokens)),  # Only read first n_tokens columns
+            on_bad_lines='skip'  # Skip lines with incorrect field counts
+        )
+    
+    if "Timestamp" in df.columns and df['Timestamp'].dtype == 'object':
         df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
     return df
 

@@ -23,6 +23,14 @@ DEFAULT_PEAK_PROMINENCE = 0.1
 DEFAULT_SMOOTH_KERNEL = 7
 TARGET_ROWS_WITH_HEADER = 121  # 120 data rows + header
 
+# Exception files (cracked composites) - accept first working result
+EXCEPTION_FILES = [
+    "15cm-12layers-9",  # First exception: cracked composite
+    # Add more exceptions here as needed, e.g.:
+    # "19cm-12layers-2",
+    # "23cm-12layers-4",
+]
+
 
 def detect_sheet_name_from_filename(filename: str) -> str:
     # Map like '27cm-12layers-3-interrogator.txt' -> '27cm-12layers-3'
@@ -95,49 +103,48 @@ def parse_distance_cm(sheet: str) -> int | None:
 
 def choose_search_params(sheet: str):
     # Heuristic: shorter distances have smaller amplitude transitions → need lower thresholds and lighter smoothing
+    # Optimized parameter ranges to reduce search time while maintaining functionality
     dist = parse_distance_cm(sheet)
     if dist is not None and dist >= 23:
-        # Larger distances might have more pronounced peaks but also more noise. Use a wider search.
+        # Larger distances: reduced combinations from ~8800 to ~200
         return {
-            "h_start": 0.1,
-            "h_end": 2.0,
-            "h_step": 0.02,
-            "p_start": 0.1,
-            "p_end": 1.0,
-            "p_step": 0.02,
-            "smooth_kernels": [9, 7],
+            "h_values": [0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.7, 1.0, 1.5, 2.0],  # 10 values
+            "p_values": [0.1, 0.15, 0.2, 0.3, 0.5, 0.7, 1.0],  # 7 values  
+            "smooth_kernels": [7, 9],  # Try 7 first as it's generally better
         }
     else:
-        # Default for shorter distances
+        # Default for shorter distances: reduced combinations from ~2700 to ~140
         return {
-            "h_start": 0.05,
-            "h_end": 0.8,
-            "h_step": 0.01,
-            "p_start": 0.05,
-            "p_end": 0.4,
-            "p_step": 0.02,
-            "smooth_kernels": [7, 5],
+            "h_values": [0.05, 0.08, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.8],  # 11 values
+            "p_values": [0.05, 0.08, 0.1, 0.15, 0.2, 0.3, 0.4],  # 7 values
+            "smooth_kernels": [7, 5],  # Try 7 first as it's generally better
         }
 
 
 def search_threshold_for_file(txt: Path, sheet: str, out_base: Path) -> Path | None:
+    # Check if this is an exception file (cracked composite)
+    is_exception = sheet in EXCEPTION_FILES
+    if is_exception:
+        print(f"  Exception file detected: {sheet} - using first working result")
+        return search_threshold_for_exception_file(txt, sheet, out_base)
+    
     params = choose_search_params(sheet)
-    h_start, h_end, h_step = params["h_start"], params["h_end"], params["h_step"]
-    p_start, p_end, p_step = params["p_start"], params["p_end"], params["p_step"]
+    h_values = params["h_values"]
+    p_values = params["p_values"]
 
     best_result = {"path": None, "lines": -1, "params": {}}
     min_dist = float("inf")
+    temp_files = []  # Track temporary files for cleanup
 
     for sk in params["smooth_kernels"]:
         print(f"  Trying smooth_kernel={sk}")
-        # Iterate over a grid of peak height and prominence values
-        for i in range(int((h_end - h_start) / h_step) + 1):
-            h = h_start + i * h_step
-            for j in range(int((p_end - p_start) / p_step) + 1):
-                p = p_start + j * p_step
+        # Try parameter combinations, starting with more promising values first
+        for h in h_values:
+            for p in p_values:
                 out_csv = out_base
                 try:
                     produced = try_run(txt, sheet, out_csv, h, p, sk)
+                    temp_files.append(produced)  # Track for potential cleanup
                 except subprocess.CalledProcessError:
                     # This combination is likely invalid for the signal, so we can skip it quietly
                     continue
@@ -147,6 +154,8 @@ def search_threshold_for_file(txt: Path, sheet: str, out_base: Path) -> Path | N
 
                 if n_lines == TARGET_ROWS_WITH_HEADER:
                     print(f"  Found optimal params: h={h:.3f}, p={p:.3f} yielding {n_lines} lines")
+                    # Clean up other temporary files but keep the successful one
+                    _cleanup_temp_files([f for f in temp_files if f != produced])
                     return produced
                 
                 # If not exact, find the closest within a tolerance
@@ -156,6 +165,19 @@ def search_threshold_for_file(txt: Path, sheet: str, out_base: Path) -> Path | N
                     min_dist = dist
                     best_result = {"path": produced, "lines": n_lines, "params": {"h": h, "p": p, "sk": sk}}
 
+                # Early exit if we find something very close (within 2 rows)
+                if dist <= 2:
+                    print(f"  Found very close match: {n_lines} lines (params: h={h:.3f}, p={p:.3f}, sk={sk})")
+                    # Clean up other temporary files but keep the successful one
+                    _cleanup_temp_files([f for f in temp_files if f != produced])
+                    return produced
+
+    # Clean up all temporary files except the best result
+    if best_result["path"]:
+        _cleanup_temp_files([f for f in temp_files if f != best_result["path"]])
+    else:
+        _cleanup_temp_files(temp_files)
+
     # Accept the best result if it's within a reasonable tolerance (e.g., 15 rows)
     if best_result["path"] and min_dist <= 15:
         p = best_result['params']
@@ -163,6 +185,48 @@ def search_threshold_for_file(txt: Path, sheet: str, out_base: Path) -> Path | N
         return best_result["path"]
 
     return None
+
+
+def search_threshold_for_exception_file(txt: Path, sheet: str, out_base: Path) -> Path | None:
+    """Simplified search for exception files (cracked composites) - accept first working result."""
+    params = choose_search_params(sheet)
+    h_values = params["h_values"][:3]  # Only try first 3 height values
+    p_values = params["p_values"][:3]  # Only try first 3 prominence values
+    
+    # Try only the first (most promising) smooth kernel
+    sk = params["smooth_kernels"][0]
+    print(f"  Using simplified search with smooth_kernel={sk}")
+    
+    for h in h_values:
+        for p in p_values:
+            out_csv = out_base
+            try:
+                produced = try_run(txt, sheet, out_csv, h, p, sk)
+                n_lines = count_lines(produced)
+                print(f"  h={h:.3f}, p={p:.3f} -> {n_lines} lines")
+                
+                # Accept any reasonable result (more than 20 lines)
+                if n_lines > 20:
+                    print(f"  Accepting first working result: {n_lines} lines (params: h={h:.3f}, p={p:.3f}, sk={sk})")
+                    return produced
+                    
+            except subprocess.CalledProcessError:
+                # This combination failed, try next
+                continue
+    
+    print(f"  Warning: No working parameters found for exception file {sheet}")
+    return None
+
+
+def _cleanup_temp_files(temp_files):
+    """Clean up temporary files to reduce I/O overhead."""
+    for temp_file in temp_files:
+        try:
+            if temp_file and temp_file.exists():
+                temp_file.unlink()
+        except Exception:
+            # Ignore cleanup errors
+            pass
 
 
 def main():

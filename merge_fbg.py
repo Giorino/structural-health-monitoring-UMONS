@@ -18,9 +18,12 @@ def find_wl_columns(df):
 def select_wl_channels(df, wl_cols, channels_to_use=3):
     if not wl_cols:
         return []
+    # Optimized: only check the first few columns since user prioritizes first 3
+    # This avoids expensive computation on all columns when we only need the first 3
+    wl_cols_limited = wl_cols[:min(6, len(wl_cols))]  # Limit to first 6 columns max
     # Rank by number of non-null values (desc), then keep order stable
-    non_null_counts = {c: int(df[c].notna().sum()) for c in wl_cols}
-    ranked = sorted(wl_cols, key=lambda c: (-non_null_counts[c], wl_cols.index(c)))
+    non_null_counts = {c: int(df[c].notna().sum()) for c in wl_cols_limited}
+    ranked = sorted(wl_cols_limited, key=lambda c: (-non_null_counts[c], wl_cols_limited.index(c)))
     return ranked[:channels_to_use]
 
 def find_time_column(df):
@@ -36,40 +39,44 @@ def find_time_column(df):
     return None
 
 def load_interrogator(txt_path):
-    # Robust loader that handles wrapped headers and a variable number of WL columns
+    # Optimized loader that handles wrapped headers and a variable number of WL columns
     path = str(txt_path)
-    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-        lines = f.read().splitlines()
-
-    # find first data line (starts with ISO timestamp or numeric time)
+    
+    # Optimized: Read only first few lines to detect structure, then use pandas directly
     import re as _re
     data_start = 0
     iso_re = _re.compile(r"^\d{4}-\d{2}-\d{2}T")
-    for i, line in enumerate(lines[:50]):  # scan first 50 lines
-        stripped = line.strip()
-        if not stripped:
-            continue
-        parts = stripped.split()
-        if iso_re.match(stripped):
-            # Expect at least 3 tokens: timestamp, time(s), wl1
-            if len(parts) >= 3:
-                data_start = i
+    
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+        # Only read what we need to detect the structure
+        for i, line in enumerate(f):
+            if i >= 50:  # Don't scan beyond first 50 lines
                 break
-        else:
-            # alternate: line begins with a number (time) followed by wl
-            try:
-                float(parts[0])
-                if len(parts) >= 2:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            parts = stripped.split()
+            if iso_re.match(stripped):
+                # Expect at least 3 tokens: timestamp, time(s), wl1
+                if len(parts) >= 3:
                     data_start = i
+                    first_data_tokens = parts
                     break
-            except Exception:
-                pass
+            else:
+                # alternate: line begins with a number (time) followed by wl
+                try:
+                    float(parts[0])
+                    if len(parts) >= 2:
+                        data_start = i
+                        first_data_tokens = parts
+                        break
+                except Exception:
+                    pass
 
     # Determine number of columns from first data row
-    first_data_tokens = lines[data_start].split()
     n_tokens = len(first_data_tokens)
     # Build names: assume first token is Timestamp (string) if it looks like ISO, otherwise Time_s
-    if iso_re.match(lines[data_start]):
+    if iso_re.match(' '.join(first_data_tokens)):
         names = ["Timestamp", "Time_s"]
         wl_count = max(0, n_tokens - 2)
     else:
@@ -77,17 +84,31 @@ def load_interrogator(txt_path):
         wl_count = max(0, n_tokens - 1)
     names += [f"WL {i}[nm]" for i in range(1, wl_count + 1)]
 
-    # Read data from data_start with whitespace delimiter, no header
-    df = pd.read_csv(
-        path,
-        sep=r'\s+',
-        header=None,
-        names=names,
-        skiprows=data_start,
-        engine='python'
-    )
-    # Try to coerce Timestamp to datetime if present
-    if 'Timestamp' in df.columns:
+    # Optimized: Use faster C engine when possible, limit to needed columns
+    try:
+        df = pd.read_csv(
+            path,
+            sep=r'\s+',
+            header=None,
+            names=names,
+            skiprows=data_start,
+            engine='c' if len(names) <= 20 else 'python',  # C engine is faster but has limitations
+            usecols=names[:min(8, len(names))]  # Only read first 8 columns (more than enough)
+        )
+    except Exception:
+        # Fallback to python engine if C engine fails
+        df = pd.read_csv(
+            path,
+            sep=r'\s+',
+            header=None,
+            names=names,
+            skiprows=data_start,
+            engine='python',
+            usecols=names[:min(8, len(names))]
+        )
+    
+    # Try to coerce Timestamp to datetime if present (only if needed)
+    if 'Timestamp' in df.columns and df['Timestamp'].dtype == 'object':
         df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
     return df
 
