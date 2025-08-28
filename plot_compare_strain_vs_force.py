@@ -87,7 +87,20 @@ def _plot_by_distance_small_multiples(df: pd.DataFrame, latest_dir: str) -> str:
     if not dists:
         return ""
 
-    # No longer computing global y limits - will use individual scaling per subplot
+    # Calculate global x-axis limits (force range) for consistent scaling across all subplots
+    global_force = pd.to_numeric(df.get("Force (N)"), errors="coerce")
+    global_force_clean = global_force.dropna()
+    if len(global_force_clean) > 0:
+        global_x_min = float(global_force_clean.min())
+        global_x_max = float(global_force_clean.max())
+        # Add 5% padding to the global range
+        x_range = global_x_max - global_x_min
+        if x_range > 0:
+            x_pad = 0.05 * x_range
+            global_x_min -= x_pad
+            global_x_max += x_pad
+    else:
+        global_x_min, global_x_max = 0, 100  # fallback
 
     # Layout
     n = len(dists)
@@ -151,6 +164,12 @@ def _plot_by_distance_small_multiples(df: pd.DataFrame, latest_dir: str) -> str:
         ax.set_xlabel("Force (N)")
         ax.set_ylabel("Strain [\u03bcu\u03b5]")
         ax.grid(True, linestyle=":", alpha=0.6)
+        
+        # Force regular number formatting instead of scientific notation
+        ax.ticklabel_format(style='plain', axis='both')
+        
+        # Set consistent x-axis limits across all subplots
+        ax.set_xlim(global_x_min, global_x_max)
         
         # Dynamic y-axis scaling for each subplot
         all_y_values = []

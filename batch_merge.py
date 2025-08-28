@@ -69,6 +69,7 @@ def try_run(
         "--output_mode", "repetition",
         "--include_std",
         "--rep_signal_mode", "maxvar",
+        "--absolute_wavelength",  # Preserve absolute wavelength values for proper FBG strain calculation
     ]
     result = subprocess.run(
         cmd,

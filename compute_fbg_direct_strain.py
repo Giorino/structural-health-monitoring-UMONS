@@ -96,6 +96,7 @@ def _load_raw_central_baseline(raw_dir: str, base_key: str) -> Optional[float]:
     names += [f"WL {i}[nm]" for i in range(1, wl_count + 1)]
 
     try:
+        # Only read first 100 rows for baseline calculation to avoid parsing errors in corrupted data
         df_raw = pd.read_csv(
             txt_path,
             sep=r"\s+",
@@ -103,6 +104,7 @@ def _load_raw_central_baseline(raw_dir: str, base_key: str) -> Optional[float]:
             names=names,
             skiprows=data_start,
             engine="python",
+            nrows=100,  # Only read first 100 rows - sufficient for stable baseline
         )
     except Exception:
         return None
@@ -143,7 +145,10 @@ def compute_fbg_direct_microstrain_for_df(df: pd.DataFrame, pe: float = 0.22) ->
         if not series_valid.empty:
             median_abs = float(abs(series_valid.median()))
             span = float(series_valid.max() - series_valid.min())
-            looks_delta = median_abs < 10.0 and span < 50.0
+            # Improved detection: absolute wavelengths are typically > 1500 nm for FBG sensors
+            # Delta wavelengths are typically < 50 nm with small median values
+            is_absolute_range = median_abs > 1500.0  # Typical FBG absolute wavelength range
+            looks_delta = median_abs < 10.0 and span < 50.0 and not is_absolute_range
 
         if looks_delta:
             delta_lambda = series
