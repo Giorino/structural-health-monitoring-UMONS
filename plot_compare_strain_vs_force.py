@@ -205,6 +205,146 @@ def _plot_by_distance_small_multiples(df: pd.DataFrame, latest_dir: str) -> str:
     return out_path
 
 
+def _plot_overlay_all_spans(df: pd.DataFrame, latest_dir: str) -> str:
+    """Create a single overlay plot showing all span lengths on the same axes for parallelism comparison."""
+    # Gather distances per source file
+    file_to_dist = {f: _parse_distance_from_name(f) for f in df["source_file"].dropna().unique()}
+    dists = sorted({d for d in file_to_dist.values() if d is not None})
+    if not dists:
+        return ""
+
+    # Create single plot
+    fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+    
+    # Use a colormap that provides good contrast for different spans
+    cmap = plt.get_cmap("tab10", len(dists))
+    
+    # Track all force and strain values for global scaling
+    all_forces = []
+    all_fbg_strains = []
+    all_mech_strains = []
+    
+    for idx, dist in enumerate(dists):
+        color = cmap(idx)
+        files_here = [f for f, d in file_to_dist.items() if d == dist]
+        sub = df[df["source_file"].isin(files_here)].copy()
+        force = pd.to_numeric(sub.get("Force (N)"), errors="coerce")
+        fbg = pd.to_numeric(sub.get("fbg_direct_strain [\u03bcu\u03b5]"), errors="coerce")
+        mech = pd.to_numeric(sub.get("mechanical_strain [\u03bcu\u03b5]"), errors="coerce")
+        
+        # FBG data
+        mask_fbg = ~(force.isna() | fbg.isna())
+        if mask_fbg.any():
+            # Scatter plot for FBG measurements
+            ax.scatter(force[mask_fbg], fbg[mask_fbg], s=12, alpha=0.6, color=color, 
+                      label=f"FBG {int(dist)}cm", marker='o')
+            
+            # FBG linear fit
+            if mask_fbg.sum() >= 2:
+                x_fbg = force[mask_fbg].values
+                y_fbg = fbg[mask_fbg].values
+                slope_fbg, intercept_fbg = np.polyfit(x_fbg, y_fbg, deg=1)
+                xline_fbg = np.linspace(float(np.nanmin(x_fbg)), float(np.nanmax(x_fbg)), 50)
+                yline_fbg = slope_fbg * xline_fbg + intercept_fbg
+                # R^2 calculation
+                yhat_fbg = slope_fbg * x_fbg + intercept_fbg
+                ss_res_fbg = float(np.sum((y_fbg - yhat_fbg) ** 2))
+                ss_tot_fbg = float(np.sum((y_fbg - np.mean(y_fbg)) ** 2))
+                r2_fbg = 1.0 - ss_res_fbg / ss_tot_fbg if ss_tot_fbg > 0 else 0.0
+                ax.plot(xline_fbg, yline_fbg, color=color, linewidth=2.0, linestyle='-',
+                       label=f"FBG {int(dist)}cm fit (R²={r2_fbg:.2f})")
+                
+                all_forces.extend(x_fbg)
+                all_fbg_strains.extend(y_fbg)
+        
+        # Mechanical data
+        mask_mech = ~(force.isna() | mech.isna())
+        if mask_mech.any():
+            # Use lighter shade and different marker for mechanical
+            lighter_color = (*color[:3], 0.7) if len(color) == 4 else color
+            ax.scatter(force[mask_mech], mech[mask_mech], s=8, alpha=0.4, color=lighter_color,
+                      label=f"Mech {int(dist)}cm", marker='s')
+            
+            # Mechanical linear fit
+            if mask_mech.sum() >= 2:
+                x_mech = force[mask_mech].values
+                y_mech = mech[mask_mech].values
+                slope_mech, intercept_mech = np.polyfit(x_mech, y_mech, deg=1)
+                xline_mech = np.linspace(float(np.nanmin(x_mech)), float(np.nanmax(x_mech)), 50)
+                yline_mech = slope_mech * xline_mech + intercept_mech
+                ax.plot(xline_mech, yline_mech, color=lighter_color, linewidth=1.5, linestyle='--',
+                       label=f"Mech {int(dist)}cm fit")
+                
+                all_mech_strains.extend(y_mech)
+    
+    # Set labels and formatting
+    ax.set_xlabel("Force (N)", fontsize=12)
+    ax.set_ylabel("Strain [μɛ]", fontsize=12)
+    ax.set_title("Strain vs Force - All Span Lengths Overlay\n(Parallel Behavior Comparison)", fontsize=14)
+    ax.grid(True, linestyle=":", alpha=0.4)
+    
+    # Force regular number formatting instead of scientific notation
+    ax.ticklabel_format(style='plain', axis='both')
+    
+    # Set axis limits with some padding
+    if all_forces:
+        force_min, force_max = min(all_forces), max(all_forces)
+        force_range = force_max - force_min
+        if force_range > 0:
+            force_pad = 0.05 * force_range
+            ax.set_xlim(force_min - force_pad, force_max + force_pad)
+    
+    if all_fbg_strains or all_mech_strains:
+        all_strains = []
+        if all_fbg_strains:
+            all_strains.extend(all_fbg_strains)
+        if all_mech_strains:
+            all_strains.extend(all_mech_strains)
+        
+        strain_min, strain_max = min(all_strains), max(all_strains)
+        strain_range = strain_max - strain_min
+        if strain_range > 0:
+            strain_pad = 0.1 * strain_range
+            ax.set_ylim(strain_min - strain_pad, strain_max + strain_pad)
+    
+    # Create a custom legend with better organization
+    handles, labels = ax.get_legend_handles_labels()
+    
+    # Organize legend: FBG scatter, FBG fits, Mechanical scatter, Mechanical fits
+    fbg_scatter_handles = [h for h, l in zip(handles, labels) if "FBG" in l and "fit" not in l]
+    fbg_fit_handles = [h for h, l in zip(handles, labels) if "FBG" in l and "fit" in l]
+    mech_scatter_handles = [h for h, l in zip(handles, labels) if "Mech" in l and "fit" not in l]
+    mech_fit_handles = [h for h, l in zip(handles, labels) if "Mech" in l and "fit" in l]
+    
+    fbg_scatter_labels = [l for l in labels if "FBG" in l and "fit" not in l]
+    fbg_fit_labels = [l for l in labels if "FBG" in l and "fit" in l]
+    mech_scatter_labels = [l for l in labels if "Mech" in l and "fit" not in l]
+    mech_fit_labels = [l for l in labels if "Mech" in l and "fit" in l]
+    
+    # Create two-column legend
+    legend1 = ax.legend(fbg_scatter_handles + fbg_fit_handles, 
+                       fbg_scatter_labels + fbg_fit_labels, 
+                       loc='upper left', fontsize=9, frameon=True, framealpha=0.9,
+                       title="FBG Measurements", title_fontsize=10)
+    legend1.get_frame().set_linewidth(0.8)
+    
+    # Add second legend for mechanical
+    if mech_scatter_handles or mech_fit_handles:
+        legend2 = ax.legend(mech_scatter_handles + mech_fit_handles, 
+                           mech_scatter_labels + mech_fit_labels, 
+                           loc='lower right', fontsize=9, frameon=True, framealpha=0.9,
+                           title="Mechanical Theory", title_fontsize=10)
+        legend2.get_frame().set_linewidth(0.8)
+        ax.add_artist(legend1)  # Add back the first legend
+    
+    # Save the plot
+    out_path = os.path.join(latest_dir, "strain_vs_force_overlay_all_spans.png")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    return out_path
+
+
 def main(base_output_dir: Optional[str] = None) -> None:
     latest_dir = find_latest_output_directory(base_output_dir)
     if not latest_dir:
@@ -241,13 +381,21 @@ def main(base_output_dir: Optional[str] = None) -> None:
     cmap = plt.get_cmap('tab20', max(2, len(ordered_keys)))
     color_by_key = {k: cmap(i) for i, k in enumerate(ordered_keys)}
 
-    # Create the faceted plot by distance (only plot we now produce)
+    # Create the faceted plot by distance 
     try:
         out_facet = _plot_by_distance_small_multiples(df, latest_dir)
         if out_facet:
             print(f"Saved: {out_facet}")
     except Exception as e:
         print(f"Skipped faceted plot due to error: {e}")
+
+    # Create the overlay plot showing all spans on single axes for parallelism analysis
+    try:
+        out_overlay = _plot_overlay_all_spans(df, latest_dir)
+        if out_overlay:
+            print(f"Saved: {out_overlay}")
+    except Exception as e:
+        print(f"Skipped overlay plot due to error: {e}")
 
 
 if __name__ == "__main__":
