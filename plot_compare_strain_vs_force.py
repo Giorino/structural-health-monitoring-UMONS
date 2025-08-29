@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import List, Optional
+from typing import List, Optional, Dict, Tuple
 import math
 
 import numpy as np
@@ -345,6 +345,193 @@ def _plot_overlay_all_spans(df: pd.DataFrame, latest_dir: str) -> str:
     return out_path
 
 
+# ============================================================================
+# NEW CROSS-CHECK ANALYSES
+# ============================================================================
+
+def extract_slope_and_stats(force: np.ndarray, strain: np.ndarray) -> Tuple[float, float, float]:
+    """Extract slope, intercept, and R² from linear fit."""
+    if len(force) < 2 or len(strain) < 2:
+        return np.nan, np.nan, np.nan
+    
+    # Remove any NaN/inf values
+    mask = np.isfinite(force) & np.isfinite(strain)
+    if np.sum(mask) < 2:
+        return np.nan, np.nan, np.nan
+    
+    x_clean = force[mask]
+    y_clean = strain[mask]
+    
+    # Linear fit
+    slope, intercept = np.polyfit(x_clean, y_clean, deg=1)
+    
+    # R² calculation
+    y_pred = slope * x_clean + intercept
+    ss_res = np.sum((y_clean - y_pred) ** 2)
+    ss_tot = np.sum((y_clean - np.mean(y_clean)) ** 2)
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+    
+    return float(slope), float(intercept), float(r2)
+
+
+def analyze_slope_vs_span(df: pd.DataFrame, latest_dir: str) -> Tuple[str, pd.DataFrame]:
+    """1. Slope vs. Span Length Test - Check if k_L scales linearly with span."""
+    # Get span lengths and group data by span
+    file_to_dist = {f: _parse_distance_from_name(f) for f in df["source_file"].dropna().unique()}
+    dists = sorted({d for d in file_to_dist.values() if d is not None})
+    
+    if len(dists) < 3:
+        print("Warning: Need at least 3 different span lengths for slope analysis")
+        return "", pd.DataFrame()
+    
+    # Extract slopes for each span
+    slope_data = []
+    
+    for dist in dists:
+        files_here = [f for f, d in file_to_dist.items() if d == dist]
+        sub = df[df["source_file"].isin(files_here)].copy()
+        
+        force = pd.to_numeric(sub.get("Force (N)"), errors="coerce")
+        fbg_strain = pd.to_numeric(sub.get("fbg_direct_strain [\u03bcu\u03b5]"), errors="coerce")
+        
+        # Clean data and convert to numpy arrays
+        mask = ~(force.isna() | fbg_strain.isna())
+        if not mask.any():
+            continue
+            
+        force_clean = force[mask].values
+        fbg_strain_clean = fbg_strain[mask].values
+        
+        # Get slope k_L = dε/dF
+        slope, intercept, r2 = extract_slope_and_stats(force_clean, fbg_strain_clean)
+        
+        slope_data.append({
+            'span_length_cm': dist,
+            'span_length_m': dist / 100.0,
+            'slope_k_L': slope,  # με/N
+            'intercept': intercept,
+            'r2': r2,
+            'n_points': len(sub)
+        })
+    
+    slope_df = pd.DataFrame(slope_data)
+    
+    # Plot k_L vs L
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    
+    # Left plot: Slope vs span length
+    valid_mask = np.isfinite(slope_df['slope_k_L'])
+    if valid_mask.sum() >= 2:
+        # Separate 27cm span from others
+        outlier_mask = slope_df['span_length_cm'] == 27.0
+        normal_mask = valid_mask & ~outlier_mask
+        
+        # Plot normal spans in blue
+        if normal_mask.sum() > 0:
+            x_normal = slope_df.loc[normal_mask, 'span_length_m'].values
+            y_normal = slope_df.loc[normal_mask, 'slope_k_L'].values
+            ax1.scatter(x_normal, y_normal, s=80, alpha=0.8, color='blue', edgecolors='navy', label='Normal spans')
+            
+            # Fit regression through origin using only normal spans
+            if len(x_normal) >= 2:
+                a_origin = np.sum(x_normal * y_normal) / np.sum(x_normal ** 2)
+                x_line = np.linspace(0, max(slope_df.loc[valid_mask, 'span_length_m']) * 1.1, 100)
+                y_line = a_origin * x_line
+                ax1.plot(x_line, y_line, 'r--', linewidth=2, 
+                        label=f'k_L = {a_origin:.2e}·L (normal spans only)')
+                
+                # R² for fit through origin (normal spans only)
+                y_pred_origin = a_origin * x_normal
+                ss_res_origin = np.sum((y_normal - y_pred_origin) ** 2)
+                ss_tot_origin = np.sum((y_normal - np.mean(y_normal)) ** 2)
+                r2_origin = 1.0 - ss_res_origin / ss_tot_origin if ss_tot_origin > 0 else 0.0
+                
+                ax1.text(0.05, 0.95, f'R² = {r2_origin:.3f} (excl. 27cm)', transform=ax1.transAxes, 
+                        fontsize=11, verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat'))
+        
+        # Plot 27cm span in light grey
+        if (valid_mask & outlier_mask).sum() > 0:
+            x_outlier = slope_df.loc[valid_mask & outlier_mask, 'span_length_m'].values
+            y_outlier = slope_df.loc[valid_mask & outlier_mask, 'slope_k_L'].values
+            ax1.scatter(x_outlier, y_outlier, s=80, alpha=0.6, color='lightgray', edgecolors='gray', 
+                       label='27cm span (excluded)')
+    
+    ax1.set_xlabel('Span Length L (m)')
+    ax1.set_ylabel('Slope k_L (με/N)')
+    ax1.set_title('FBG Strain-Force Slope vs Span Length\n(Theory predicts linear relationship)')
+    ax1.grid(True, alpha=0.3)
+    ax1.legend()
+    
+    # Right plot: R² values for each span's strain-force fit
+    colors = ['lightgray' if span == 27.0 else 'green' for span in slope_df['span_length_cm']]
+    edgecolors = ['gray' if span == 27.0 else 'darkgreen' for span in slope_df['span_length_cm']]
+    
+    ax2.bar(slope_df['span_length_cm'], slope_df['r2'], alpha=0.7, color=colors, edgecolor=edgecolors)
+    ax2.set_xlabel('Span Length (cm)')
+    ax2.set_ylabel('R² for Strain vs Force Fit')
+    ax2.set_title('Quality of Linear Fits by Span')
+    ax2.grid(True, alpha=0.3)
+    ax2.set_ylim(0, 1.1)
+    
+    # Add R² values as text
+    for _, row in slope_df.iterrows():
+        if not np.isnan(row['r2']):
+            ax2.text(row['span_length_cm'], row['r2'] + 0.02, f'{row["r2"]:.3f}', 
+                    ha='center', va='bottom', fontsize=9)
+    
+    plt.tight_layout()
+    out_path = os.path.join(latest_dir, "slope_vs_span_analysis.png")
+    plt.savefig(out_path, dpi=300)
+    plt.close(fig)
+    
+    return out_path, slope_df
+
+    # EI cross-validation removed per user request
+
+
+def generate_summary_table(slope_df: pd.DataFrame, latest_dir: str) -> str:
+    """Generate summary table for slope vs span only (27cm shown but excluded from fits)."""
+    summary = slope_df.copy() if not slope_df.empty else pd.DataFrame()
+    if summary.empty:
+        return ""
+
+    # Keep only slope-related columns
+    keep_cols = ['span_length_cm', 'span_length_m', 'slope_k_L', 'r2', 'n_points']
+    summary = summary[keep_cols]
+
+    # Rename for presentation
+    summary = summary.rename(columns={
+        'span_length_cm': 'Span (cm)',
+        'span_length_m': 'Span (m)',
+        'slope_k_L': 'k_L (με/N)',
+        'r2': 'R² (ε-F)',
+        'n_points': 'Data Points',
+    })
+
+    # Format
+    if 'Span (m)' in summary.columns:
+        summary['Span (m)'] = summary['Span (m)'].apply(lambda x: f"{x:.3f}" if pd.notna(x) else 'N/A')
+    if 'k_L (με/N)' in summary.columns:
+        summary['k_L (με/N)'] = summary['k_L (με/N)'].apply(lambda x: f"{x:.2e}" if pd.notna(x) else 'N/A')
+    if 'R² (ε-F)' in summary.columns:
+        summary['R² (ε-F)'] = summary['R² (ε-F)'].apply(lambda x: f"{x:.3f}" if pd.notna(x) else 'N/A')
+
+    # Save and print
+    csv_path = os.path.join(latest_dir, "cross_check_analysis_summary.csv")
+    summary.to_csv(csv_path, index=False)
+
+    print("\n" + "="*60)
+    print("SLOPE VS SPAN SUMMARY")
+    print("="*60)
+    print("Note: 27cm span excluded from linear fits but shown in grey")
+    print("="*60)
+    print(summary.to_string(index=False))
+    print("="*60)
+    print(f"\nDetailed results saved to: {csv_path}")
+
+    return csv_path
+
+
 def main(base_output_dir: Optional[str] = None) -> None:
     latest_dir = find_latest_output_directory(base_output_dir)
     if not latest_dir:
@@ -396,6 +583,41 @@ def main(base_output_dir: Optional[str] = None) -> None:
             print(f"Saved: {out_overlay}")
     except Exception as e:
         print(f"Skipped overlay plot due to error: {e}")
+
+    # ============================================================================
+    # NEW CROSS-CHECK ANALYSES
+    # ============================================================================
+    
+    print("\n" + "="*60)
+    print("PERFORMING CROSS-CHECK ANALYSES")
+    print("="*60)
+    print("Note: 27cm span treated as outlier (shown in grey, excluded from fits)")
+    print("="*60)
+    
+    # Initialize result dataframes
+    slope_df = pd.DataFrame()
+    
+    # 1. Slope vs. Span Length Test
+    try:
+        print("1. Analyzing slope vs span length...")
+        out_slope, slope_df = analyze_slope_vs_span(df, latest_dir)
+        if out_slope:
+            print(f"   Saved: {os.path.basename(out_slope)}")
+    except Exception as e:
+        print(f"   Skipped slope analysis due to error: {e}")
+    
+    # 2. Generate Summary Table
+    try:
+        print("2. Generating summary table...")
+        summary_csv = generate_summary_table(slope_df, latest_dir)
+        if summary_csv:
+            print(f"   Saved: {os.path.basename(summary_csv)}")
+    except Exception as e:
+        print(f"   Failed to generate summary table: {e}")
+    
+    print("="*60)
+    print("CROSS-CHECK ANALYSES COMPLETE")
+    print("="*60)
 
 
 if __name__ == "__main__":
