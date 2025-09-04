@@ -25,7 +25,8 @@ TARGET_ROWS_WITH_HEADER = 121  # 120 data rows + header
 
 # Exception files (cracked composites) - accept first working result
 EXCEPTION_FILES = [
-    "15cm-12layers-9",  # First exception: cracked composite
+    "15cm-12layers-9",
+    "23cm-12layers-4", # First exception: cracked composite
     # Add more exceptions here as needed, e.g.:
     # "19cm-12layers-2",
     # "23cm-12layers-4",
