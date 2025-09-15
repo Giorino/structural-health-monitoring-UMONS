@@ -57,7 +57,7 @@ class SequenceDataset(Dataset):
 class GRUModel(nn.Module):
     """GRU-based model for crack prediction"""
     
-    def __init__(self, input_size=6, hidden_size=64, num_classes=4, dropout=0.2):
+    def __init__(self, input_size=9, hidden_size=64, num_classes=4, dropout=0.2):
         super(GRUModel, self).__init__()
         self.hidden_size = hidden_size
         self.gru = nn.GRU(input_size, hidden_size, batch_first=True, dropout=dropout)
@@ -76,7 +76,7 @@ class GRUModel(nn.Module):
 class LSTMModel(nn.Module):
     """LSTM-based model for crack prediction"""
     
-    def __init__(self, input_size=6, hidden_size=64, num_classes=4, dropout=0.2):
+    def __init__(self, input_size=9, hidden_size=64, num_classes=4, dropout=0.2):
         super(LSTMModel, self).__init__()
         self.hidden_size = hidden_size
         self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True, dropout=dropout)
@@ -95,7 +95,7 @@ class LSTMModel(nn.Module):
 class CNNGRUModel(nn.Module):
     """CNN-GRU hybrid model for crack prediction"""
     
-    def __init__(self, input_size=6, hidden_size=64, num_classes=4, dropout=0.2):
+    def __init__(self, input_size=9, hidden_size=64, num_classes=4, dropout=0.2):
         super(CNNGRUModel, self).__init__()
         self.conv1 = nn.Conv1d(input_size, 16, kernel_size=3, padding=1)
         self.conv2 = nn.Conv1d(16, 32, kernel_size=3, padding=1)
@@ -125,7 +125,7 @@ class CNNGRUModel(nn.Module):
 class TransformerModel(nn.Module):
     """Transformer Encoder model for crack prediction"""
     
-    def __init__(self, input_size=6, d_model=64, num_heads=2, num_layers=2, num_classes=4, dropout=0.2):
+    def __init__(self, input_size=9, d_model=64, num_heads=2, num_layers=2, num_classes=4, dropout=0.2):
         super(TransformerModel, self).__init__()
         self.input_projection = nn.Linear(input_size, d_model)
         self.pos_encoding = nn.Parameter(torch.randn(1000, d_model))  # Max sequence length
@@ -162,7 +162,7 @@ class TransformerModel(nn.Module):
 class CNNModel(nn.Module):
     """Pure CNN model for crack prediction"""
     
-    def __init__(self, input_size=6, num_classes=4, dropout=0.2):
+    def __init__(self, input_size=9, num_classes=4, dropout=0.2):
         super(CNNModel, self).__init__()
         self.conv1 = nn.Conv1d(input_size, 32, kernel_size=3, padding=1)
         self.conv2 = nn.Conv1d(32, 64, kernel_size=3, padding=1)
@@ -232,8 +232,11 @@ def generate_synthetic_data(num_samples=1000, sequence_length=25):
                 delta_wl_rate = 0
                 delta_disp_rate = 0
             
+            # Randomly assign small sample status for synthetic data
+            is_small_sample = np.random.choice([0, 1], p=[0.7, 0.3])  # 30% chance of small sample
+            
             sequence.append([wl_ch2, wl_ch2_std, delta_wl_ch2, force, displacement, air_pressure, 
-                           delta_wl_rate, delta_disp_rate])
+                           delta_wl_rate, delta_disp_rate, is_small_sample])
         
         # Assign crack label based on maximum displacement/strain
         max_displacement = max([s[4] for s in sequence])
@@ -310,9 +313,23 @@ def load_and_preprocess_data(data_dir="./", prediction_horizon=5):
         try:
             df = pd.read_csv(file_path)
             
-            # Expected columns (with actual CSV column names)
-            required_cols = ['group_index', 'repetition_index', 'WL_ch2', 'WL_ch2_std', 
-                           'Force (N)', 'Displacement (mm)', 'Air Pressure (bar)', 'Crack']
+            # Detect small samples from filename (contains "-s")
+            filename = os.path.basename(file_path)
+            is_small_sample = "-s" in filename
+            print(f"{'Small sample' if is_small_sample else 'Regular sample'} detected: {filename}")
+            
+            # Base required columns (common to all files)
+            base_required_cols = ['group_index', 'repetition_index', 'WL_ch2', 'WL_ch2_std', 
+                                'Force (N)', 'Displacement (mm)', 'Crack']
+            
+            # Handle Air Pressure column differences between regular and small samples
+            if is_small_sample:
+                # Small samples may not have Air Pressure column, use default value
+                if 'Air Pressure (bar)' not in df.columns:
+                    print("  → Adding default Air Pressure value for small sample")
+                    df['Air Pressure (bar)'] = 1.0  # Default air pressure for small samples
+            
+            required_cols = base_required_cols + ['Air Pressure (bar)']
             
             missing_cols = [col for col in required_cols if col not in df.columns]
             if missing_cols:
@@ -347,9 +364,12 @@ def load_and_preprocess_data(data_dir="./", prediction_horizon=5):
                 group_df['delta_wl_rate'] = group_df['delta_wl_ch2'].diff().fillna(0)
                 group_df['delta_disp_rate'] = group_df['Displacement (mm)'].diff().fillna(0)
                 
-                # Create feature sequence (using actual CSV column names)
+                # Add small sample indicator as a feature (binary: 1 for small sample, 0 for regular)
+                group_df['is_small_sample'] = 1 if is_small_sample else 0
+                
+                # Create feature sequence (using actual CSV column names + small sample indicator)
                 features = ['WL_ch2', 'WL_ch2_std', 'delta_wl_ch2', 'Force (N)', 
-                           'Displacement (mm)', 'Air Pressure (bar)', 'delta_wl_rate', 'delta_disp_rate']
+                           'Displacement (mm)', 'Air Pressure (bar)', 'delta_wl_rate', 'delta_disp_rate', 'is_small_sample']
                 
                 sequence = group_df[features].values
                 
@@ -467,11 +487,18 @@ def train_model(model, train_loader, val_loader, num_epochs=50, learning_rate=0.
     for _, labels in train_loader:
         all_labels.extend(labels.cpu().numpy())
     
-    class_counts = np.bincount(all_labels)
-    # Avoid division by zero and handle small counts
-    class_counts = np.maximum(class_counts, 1)  # Ensure minimum count of 1
+    # Get unique classes and their counts
+    unique_classes = sorted(set(all_labels))
+    num_classes = 4  # Fixed number of classes as defined in model
+    
+    # Initialize class counts array for all classes
+    class_counts = np.ones(num_classes)  # Start with 1 to avoid division by zero
+    for class_idx in unique_classes:
+        if class_idx < num_classes:
+            class_counts[class_idx] = all_labels.count(class_idx)
+    
     total_samples = len(all_labels)
-    class_weights = total_samples / (len(class_counts) * class_counts)
+    class_weights = total_samples / (num_classes * class_counts)
     class_weights = torch.FloatTensor(class_weights).to(device)
     
     criterion = nn.CrossEntropyLoss(weight=class_weights)
@@ -727,7 +754,7 @@ def main():
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     
     # 6. Define models
-    input_size = 8  # WL_ch2, WL_ch2_std, delta_wl_ch2, Force, Displacement, Air Pressure, rates
+    input_size = 9  # WL_ch2, WL_ch2_std, delta_wl_ch2, Force, Displacement, Air Pressure, rates, is_small_sample
     num_classes = 4  # 0, 1, 2, 3
     
     models = {

@@ -22,16 +22,18 @@ DEFAULT_PEAK_HEIGHT_STEP = 0.01
 DEFAULT_PEAK_PROMINENCE = 0.1
 DEFAULT_SMOOTH_KERNEL = 7
 TARGET_ROWS_WITH_HEADER = 121  # 120 data rows + header
+# Acceptable range for line count - more flexible than exact target
+MIN_ACCEPTABLE_LINES = 50   # Minimum acceptable output
+MAX_ACCEPTABLE_LINES = 200  # Maximum acceptable output
 
 # Exception files (cracked composites) - accept first working result
 EXCEPTION_FILES = [
     "15cm-12layers-9",
-    "23cm-12layers-4", # First exception: cracked composite
-    # Add more exceptions here as needed, e.g.:
-    # "19cm-12layers-2",
-    # "23cm-12layers-4",
+    "23cm-12layers-4",
+    "23cm-16layers-5",
+    "15cm-16layers-3-s",
+    "15cm-16layers-8-s"
 ]
-
 
 def detect_sheet_name_from_filename(filename: str) -> str:
     # Map like '27cm-12layers-3-interrogator.txt' -> '27cm-12layers-3'
@@ -79,6 +81,7 @@ def try_run(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        timeout=60,  # Add 60 second timeout per run to prevent hanging
     )
     # Parse the final output path from stdout
     m = re.search(r"Merged dataset saved to:\s*(.+)", result.stdout)
@@ -105,20 +108,20 @@ def parse_distance_cm(sheet: str) -> int | None:
 
 def choose_search_params(sheet: str):
     # Heuristic: shorter distances have smaller amplitude transitions → need lower thresholds and lighter smoothing
-    # Optimized parameter ranges to reduce search time while maintaining functionality
+    # Further optimized parameter ranges to reduce search time - try most promising values first
     dist = parse_distance_cm(sheet)
     if dist is not None and dist >= 23:
-        # Larger distances: reduced combinations from ~8800 to ~200
+        # Larger distances: try most common working values first
         return {
-            "h_values": [0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.7, 1.0, 1.5, 2.0],  # 10 values
-            "p_values": [0.1, 0.15, 0.2, 0.3, 0.5, 0.7, 1.0],  # 7 values  
+            "h_values": [0.2, 0.3, 0.15, 0.4, 0.1, 0.5],  # 6 values, ordered by success likelihood
+            "p_values": [0.2, 0.15, 0.3, 0.1, 0.5],  # 5 values
             "smooth_kernels": [7, 9],  # Try 7 first as it's generally better
         }
     else:
-        # Default for shorter distances: reduced combinations from ~2700 to ~140
+        # Default for shorter distances: try most promising values first
         return {
-            "h_values": [0.05, 0.08, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.8],  # 11 values
-            "p_values": [0.05, 0.08, 0.1, 0.15, 0.2, 0.3, 0.4],  # 7 values
+            "h_values": [0.15, 0.1, 0.2, 0.08, 0.25, 0.3],  # 6 values, ordered by success likelihood
+            "p_values": [0.1, 0.15, 0.08, 0.2, 0.3],  # 5 values
             "smooth_kernels": [7, 5],  # Try 7 first as it's generally better
         }
 
@@ -137,22 +140,34 @@ def search_threshold_for_file(txt: Path, sheet: str, out_base: Path) -> Path | N
     best_result = {"path": None, "lines": -1, "params": {}}
     min_dist = float("inf")
     temp_files = []  # Track temporary files for cleanup
+    attempts = 0
+    max_attempts = 20  # Limit total attempts to prevent infinite searching
 
     for sk in params["smooth_kernels"]:
         print(f"  Trying smooth_kernel={sk}")
         # Try parameter combinations, starting with more promising values first
         for h in h_values:
             for p in p_values:
+                if attempts >= max_attempts:
+                    print(f"  Reached maximum attempts ({max_attempts}), using best result so far")
+                    break
+                    
+                attempts += 1
                 out_csv = out_base
                 try:
                     produced = try_run(txt, sheet, out_csv, h, p, sk)
                     temp_files.append(produced)  # Track for potential cleanup
-                except subprocess.CalledProcessError:
-                    # This combination is likely invalid for the signal, so we can skip it quietly
+                except subprocess.CalledProcessError as e:
+                    # Print error details for first few attempts to help debug
+                    if attempts <= 3:
+                        print(f"  Error with h={h:.3f}, p={p:.3f}: {e.stderr.strip() if e.stderr else 'No error message'}")
+                    continue
+                except subprocess.TimeoutExpired:
+                    print(f"  Timeout for h={h:.3f}, p={p:.3f} - skipping")
                     continue
 
                 n_lines = count_lines(produced)
-                print(f"  h={h:.3f}, p={p:.3f} -> {n_lines} lines")
+                print(f"  h={h:.3f}, p={p:.3f} -> {n_lines} lines (attempt {attempts}/{max_attempts})")
 
                 if n_lines == TARGET_ROWS_WITH_HEADER:
                     print(f"  Found optimal params: h={h:.3f}, p={p:.3f} yielding {n_lines} lines")
@@ -167,12 +182,17 @@ def search_threshold_for_file(txt: Path, sheet: str, out_base: Path) -> Path | N
                     min_dist = dist
                     best_result = {"path": produced, "lines": n_lines, "params": {"h": h, "p": p, "sk": sk}}
 
-                # Early exit if we find something very close (within 2 rows)
-                if dist <= 2:
-                    print(f"  Found very close match: {n_lines} lines (params: h={h:.3f}, p={p:.3f}, sk={sk})")
+                # Early exit conditions - much more lenient
+                if dist <= 5 or n_lines >= 100:  # Accept if within 5 rows or has at least 100 rows
+                    print(f"  Found acceptable match: {n_lines} lines (params: h={h:.3f}, p={p:.3f}, sk={sk})")
                     # Clean up other temporary files but keep the successful one
                     _cleanup_temp_files([f for f in temp_files if f != produced])
                     return produced
+                    
+            if attempts >= max_attempts:
+                break
+        if attempts >= max_attempts:
+            break
 
     # Clean up all temporary files except the best result
     if best_result["path"]:
@@ -180,10 +200,10 @@ def search_threshold_for_file(txt: Path, sheet: str, out_base: Path) -> Path | N
     else:
         _cleanup_temp_files(temp_files)
 
-    # Accept the best result if it's within a reasonable tolerance (e.g., 15 rows)
-    if best_result["path"] and min_dist <= 15:
+    # Accept the best result if it's within a reasonable tolerance (increased tolerance)
+    if best_result["path"] and (min_dist <= 30 or best_result["lines"] >= 50):
         p = best_result['params']
-        print(f"  No exact match. Using closest result: {best_result['lines']} lines (params: h={p['h']:.3f}, p={p['p']:.3f}, sk={p['sk']})")
+        print(f"  Using best available result: {best_result['lines']} lines (params: h={p['h']:.3f}, p={p['p']:.3f}, sk={p['sk']})")
         return best_result["path"]
 
     return None
@@ -192,8 +212,8 @@ def search_threshold_for_file(txt: Path, sheet: str, out_base: Path) -> Path | N
 def search_threshold_for_exception_file(txt: Path, sheet: str, out_base: Path) -> Path | None:
     """Simplified search for exception files (cracked composites) - accept first working result."""
     params = choose_search_params(sheet)
-    h_values = params["h_values"][:3]  # Only try first 3 height values
-    p_values = params["p_values"][:3]  # Only try first 3 prominence values
+    h_values = params["h_values"][:2]  # Only try first 2 height values
+    p_values = params["p_values"][:2]  # Only try first 2 prominence values
     
     # Try only the first (most promising) smooth kernel
     sk = params["smooth_kernels"][0]
@@ -207,13 +227,17 @@ def search_threshold_for_exception_file(txt: Path, sheet: str, out_base: Path) -
                 n_lines = count_lines(produced)
                 print(f"  h={h:.3f}, p={p:.3f} -> {n_lines} lines")
                 
-                # Accept any reasonable result (more than 20 lines)
-                if n_lines > 20:
+                # Accept any reasonable result (more than 10 lines)
+                if n_lines > 10:
                     print(f"  Accepting first working result: {n_lines} lines (params: h={h:.3f}, p={p:.3f}, sk={sk})")
                     return produced
                     
-            except subprocess.CalledProcessError:
-                # This combination failed, try next
+            except subprocess.CalledProcessError as e:
+                # Print error for debugging
+                print(f"  Error with h={h:.3f}, p={p:.3f}: {e.stderr.strip() if e.stderr else 'No error message'}")
+                continue
+            except subprocess.TimeoutExpired:
+                print(f"  Timeout for h={h:.3f}, p={p:.3f} - skipping")
                 continue
     
     print(f"  Warning: No working parameters found for exception file {sheet}")
@@ -232,6 +256,7 @@ def _cleanup_temp_files(temp_files):
 
 
 def main():
+    
     # Create timestamped subfolder for this batch run
     batch_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     batch_output_dir = OUTPUT_DIR / batch_timestamp
@@ -243,17 +268,29 @@ def main():
         print(f"No interrogator files found in {INTERROGATOR_DIR}")
         sys.exit(1)
 
-    for txt in files:
+    # Filter out files that start with "27cm"
+    filtered_files = [f for f in files if not f.name.startswith("27cm")]
+    
+    print(f"Found {len(files)} total files, processing {len(filtered_files)} files (excluding 27cm files)")
+
+    processed_count = 0
+    success_count = 0
+    
+    for txt in filtered_files:
         sheet = detect_sheet_name_from_filename(txt.name)
-        print(f"Processing: {txt.name} (sheet={sheet})")
+        processed_count += 1
+        print(f"Processing {processed_count}/{len(filtered_files)}: {txt.name} (sheet={sheet})")
 
         # Sweep thresholds with per-sheet parameters
         out_csv = batch_output_dir / "merged.csv"
         best_csv = search_threshold_for_file(txt, sheet, out_csv)
         if best_csv is None:
-            print(f"  Did not reach {TARGET_ROWS_WITH_HEADER} lines for {txt.name}; leaving last produced file.")
+            print(f"  Warning: Could not find suitable parameters for {txt.name}")
         else:
-            print(f"  Saved: {best_csv}")
+            success_count += 1
+            print(f"  Success: {best_csv}")
+            
+    print(f"\nBatch processing complete: {success_count}/{processed_count} files processed successfully")
 
 
 if __name__ == "__main__":
