@@ -8,6 +8,8 @@ import os
 import glob
 import pandas as pd
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for headless plotting
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.preprocessing import StandardScaler
@@ -21,6 +23,10 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 import warnings
 warnings.filterwarnings('ignore')
+
+# Create results directory
+RESULTS_DIR = "neural_network_results"
+os.makedirs(RESULTS_DIR, exist_ok=True)
 
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -570,7 +576,7 @@ def train_model(model, train_loader, val_loader, num_epochs=50, learning_rate=0.
             best_val_loss = avg_val_loss
             patience_counter = 0
             # Save best model
-            torch.save(model.state_dict(), f'best_{model.__class__.__name__}.pth')
+            torch.save(model.state_dict(), os.path.join(RESULTS_DIR, f'best_{model.__class__.__name__}.pth'))
         else:
             patience_counter += 1
             
@@ -620,8 +626,8 @@ def evaluate_model(model, test_loader, class_names=None):
     plt.ylabel('True Label')
     plt.xlabel('Predicted Label')
     plt.tight_layout()
-    plt.savefig(f'{model.__class__.__name__}_confusion_matrix.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.savefig(os.path.join(RESULTS_DIR, f'{model.__class__.__name__}_confusion_matrix.png'), dpi=300, bbox_inches='tight')
+    plt.close()  # Close the figure to free memory
     
     return all_predictions, all_labels, all_probabilities
 
@@ -637,45 +643,8 @@ def plot_training_history(train_losses, val_losses, model_name):
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(f'{model_name}_training_history.png', dpi=300, bbox_inches='tight')
-    plt.show()
-
-def visualize_predictions(data, predictions, labels, model_name, num_samples=5):
-    """Visualize WL_ch2 shifts with crack predictions"""
-    
-    plt.figure(figsize=(15, 10))
-    
-    for i in range(min(num_samples, len(data))):
-        plt.subplot(num_samples, 1, i+1)
-        
-        sequence = data[i]['sequence']
-        true_label = labels[i]
-        pred_label = predictions[i]
-        
-        # Plot WL_ch2 shifts (delta_wl_ch2 is column 2)
-        delta_wl = sequence[:, 2]  # delta_wl_ch2
-        
-        plt.plot(delta_wl, 'b-', linewidth=2, label='ΔWL_ch2 (Strain proxy)')
-        
-        # Color-code based on true and predicted labels
-        colors = ['green', 'yellow', 'orange', 'red']
-        default_names = ['No Crack', 'Small', 'Medium', 'Large']
-        unique_classes = sorted(set(labels + predictions))
-        class_names = [default_names[i] if i < len(default_names) else f'Class {i}' for i in unique_classes]
-        
-        # Use safe indexing for class names
-        true_name = class_names[true_label] if true_label < len(class_names) else f'Class {true_label}'
-        pred_name = class_names[pred_label] if pred_label < len(class_names) else f'Class {pred_label}'
-        plt.title(f'Sample {i+1}: True={true_name}, Pred={pred_name}')
-        plt.ylabel('ΔWL_ch2 (nm)')
-        plt.xlabel('Time Step')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-    
-    plt.suptitle(f'{model_name} - Predictions vs Actual')
-    plt.tight_layout()
-    plt.savefig(f'{model_name}_predictions_visualization.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.savefig(os.path.join(RESULTS_DIR, f'{model_name}_training_history.png'), dpi=300, bbox_inches='tight')
+    plt.close()  # Close the figure to free memory
 
 def main():
     """Main execution pipeline"""
@@ -758,10 +727,10 @@ def main():
     num_classes = 4  # 0, 1, 2, 3
     
     models = {
-        'GRU': GRUModel(input_size=input_size, num_classes=num_classes),
-        'LSTM': LSTMModel(input_size=input_size, num_classes=num_classes),
-        'CNN_GRU': CNNGRUModel(input_size=input_size, num_classes=num_classes),
-        'Transformer': TransformerModel(input_size=input_size, num_classes=num_classes),
+        #'GRU': GRUModel(input_size=input_size, num_classes=num_classes),
+        #'LSTM': LSTMModel(input_size=input_size, num_classes=num_classes),
+        #'CNN_GRU': CNNGRUModel(input_size=input_size, num_classes=num_classes),
+        #'Transformer': TransformerModel(input_size=input_size, num_classes=num_classes),
         'CNN': CNNModel(input_size=input_size, num_classes=num_classes)
     }
     
@@ -778,16 +747,11 @@ def main():
         plot_training_history(train_losses, val_losses, model_name)
         
         # Load best model
-        model.load_state_dict(torch.load(f'best_{model.__class__.__name__}.pth'))
+        model.load_state_dict(torch.load(os.path.join(RESULTS_DIR, f'best_{model.__class__.__name__}.pth')))
         model = model.to(device)
         
         # Evaluate model
         predictions, true_labels, probabilities = evaluate_model(model, test_loader)
-        
-        # Visualize predictions
-        test_data = [data[i] for i in range(len(data)) if i < len(predictions)]
-        if test_data:
-            visualize_predictions(test_data, predictions, true_labels, model_name)
         
         results[model_name] = {
             'model': model,
@@ -798,8 +762,8 @@ def main():
     
     print(f"\n{'='*60}")
     print("Training Complete!")
-    print(f"Models saved as 'best_<ModelName>.pth'")
-    print(f"Visualizations saved as PNG files")
+    print(f"Models saved in '{RESULTS_DIR}/' as 'best_<ModelName>.pth'")
+    print(f"Training history and confusion matrix plots saved in '{RESULTS_DIR}/' as PNG files")
     print(f"{'='*60}")
     
     return results, scaler
