@@ -586,7 +586,7 @@ def train_model(model, train_loader, val_loader, num_epochs=50, learning_rate=0.
     
     return train_losses, val_losses
 
-def evaluate_model(model, test_loader, class_names=None):
+def evaluate_model(model, test_loader, class_names=None, training_percentage=100):
     """Evaluate model performance on test set"""
     
     model.eval()
@@ -605,15 +605,56 @@ def evaluate_model(model, test_loader, class_names=None):
             all_labels.extend(labels.cpu().numpy())
             all_probabilities.extend(probabilities.cpu().numpy())
     
-    # Classification report
-    print(f"\n{model.__class__.__name__} Performance:")
-    print("=" * 50)
+    # Calculate overall accuracy
+    total_samples = len(all_labels)
+    correct_predictions = sum(1 for true, pred in zip(all_labels, all_predictions) if true == pred)
+    overall_accuracy = (correct_predictions / total_samples) * 100
+    
+    print(f"\n{model.__class__.__name__} Test Results Summary:")
+    print("=" * 60)
+    print(f"Total Test Samples: {total_samples}")
+    print(f"Correct Predictions: {correct_predictions}")
+    print(f"Overall Test Accuracy: {overall_accuracy:.2f}%")
+    print("=" * 60)
     
     # Determine class names based on actual data
     unique_classes = sorted(set(all_labels + all_predictions))
     if class_names is None:
         default_names = ['No Crack', 'Small', 'Medium', 'Large']
         class_names = [default_names[i] if i < len(default_names) else f'Class {i}' for i in unique_classes]
+    
+    # Detailed per-class results with percentages
+    print(f"\nDetailed Per-Class Test Results:")
+    print("-" * 60)
+    
+    # Calculate per-class statistics
+    for i, class_idx in enumerate(unique_classes):
+        class_name = class_names[i] if i < len(class_names) else f'Class {class_idx}'
+        
+        # True positives, false positives, false negatives
+        true_samples = [j for j, label in enumerate(all_labels) if label == class_idx]
+        predicted_samples = [j for j, pred in enumerate(all_predictions) if pred == class_idx]
+        
+        true_count = len(true_samples)
+        predicted_count = len(predicted_samples)
+        correct_class = sum(1 for j in true_samples if all_predictions[j] == class_idx)
+        
+        if true_count > 0:
+            class_recall = (correct_class / true_count) * 100
+        else:
+            class_recall = 0.0
+            
+        if predicted_count > 0:
+            class_precision = (correct_class / predicted_count) * 100
+        else:
+            class_precision = 0.0
+        
+        print(f"{class_name} (Class {class_idx}):")
+        print(f"  - True samples: {true_count} ({(true_count/total_samples)*100:.1f}% of total)")
+        print(f"  - Correctly predicted: {correct_class}")
+        print(f"  - Recall (Sensitivity): {class_recall:.2f}%")
+        print(f"  - Precision: {class_precision:.2f}%")
+        print()
     
     print(classification_report(all_labels, all_predictions, target_names=class_names[:len(unique_classes)]))
     
@@ -626,10 +667,15 @@ def evaluate_model(model, test_loader, class_names=None):
     plt.ylabel('True Label')
     plt.xlabel('Predicted Label')
     plt.tight_layout()
-    plt.savefig(os.path.join(RESULTS_DIR, f'{model.__class__.__name__}_confusion_matrix.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(RESULTS_DIR, f'{model.__class__.__name__}_confusion_matrix_{training_percentage}pct.png'), dpi=300, bbox_inches='tight')
     plt.close()  # Close the figure to free memory
     
-    return all_predictions, all_labels, all_probabilities
+    # Log final test accuracy for easy reference
+    print(f"\n{'='*60}")
+    print(f"FINAL TEST ACCURACY: {overall_accuracy:.2f}%")
+    print(f"{'='*60}")
+    
+    return all_predictions, all_labels, all_probabilities, overall_accuracy
 
 def plot_training_history(train_losses, val_losses, model_name):
     """Plot training and validation loss curves"""
@@ -646,10 +692,18 @@ def plot_training_history(train_losses, val_losses, model_name):
     plt.savefig(os.path.join(RESULTS_DIR, f'{model_name}_training_history.png'), dpi=300, bbox_inches='tight')
     plt.close()  # Close the figure to free memory
 
-def main():
-    """Main execution pipeline"""
+def main(training_data_percentage=100):
+    """Main execution pipeline
+    
+    Args:
+        training_data_percentage (int): Percentage of training data to actually use for training (0-100).
+                                      For example, if 50, only 50% of the allocated training data will be used.
+                                      Test and validation set sizes remain constant.
+    """
     
     print("Structural Health Monitoring - Crack Prediction Pipeline")
+    print("=" * 60)
+    print(f"Training Data Usage: {training_data_percentage}% of allocated training data will be used")
     print("=" * 60)
     
     # 1. Load and preprocess data
@@ -709,7 +763,47 @@ def main():
             X_temp, y_temp, test_size=0.25, random_state=42  # 25% of 80% = 20% total for val
         )
     
-    print(f"Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
+    print(f"Initial Split - Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
+    
+    # 4.1 Apply training data percentage reduction
+    if training_data_percentage < 100:
+        print(f"\n4.1 Reducing training data to {training_data_percentage}%...")
+        original_train_size = len(X_train)
+        target_train_size = int((training_data_percentage / 100) * original_train_size)
+        
+        if target_train_size > 0:
+            # Use stratified sampling if possible for consistent class distribution
+            unique_train_labels, train_counts = np.unique(y_train, return_counts=True)
+            min_train_count = min(train_counts)
+            
+            if min_train_count >= 2 and target_train_size >= len(unique_train_labels):
+                # Use stratified sampling
+                X_train_reduced, _, y_train_reduced, _ = train_test_split(
+                    X_train, y_train, 
+                    train_size=target_train_size, 
+                    stratify=y_train, 
+                    random_state=42
+                )
+            else:
+                # Use random sampling
+                X_train_reduced, _, y_train_reduced, _ = train_test_split(
+                    X_train, y_train, 
+                    train_size=target_train_size, 
+                    random_state=42
+                )
+            
+            X_train = X_train_reduced
+            y_train = y_train_reduced
+            
+            print(f"Reduced training set from {original_train_size} to {len(X_train)} samples")
+            print(f"Unused training data: {original_train_size - len(X_train)} samples")
+        else:
+            print("Warning: Training data percentage too low, keeping at least 1 sample")
+            X_train = X_train[:1] if len(X_train) > 0 else X_train
+            y_train = y_train[:1] if len(y_train) > 0 else y_train
+    
+    print(f"Final Split - Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
+    print(f"Total data distribution: Train {(len(X_train)/(len(X_train)+len(X_val)+len(X_test)))*100:.1f}%, Val {(len(X_val)/(len(X_train)+len(X_val)+len(X_test)))*100:.1f}%, Test {(len(X_test)/(len(X_train)+len(X_val)+len(X_test)))*100:.1f}%")
     
     # 5. Create data loaders
     batch_size = min(8, len(X_train)) if len(X_train) > 0 else 1 # Smaller batch size for small dataset
@@ -751,13 +845,14 @@ def main():
         model = model.to(device)
         
         # Evaluate model
-        predictions, true_labels, probabilities = evaluate_model(model, test_loader)
+        predictions, true_labels, probabilities, test_accuracy = evaluate_model(model, test_loader, training_percentage=training_data_percentage)
         
         results[model_name] = {
             'model': model,
             'predictions': predictions,
             'true_labels': true_labels,
-            'probabilities': probabilities
+            'probabilities': probabilities,
+            'test_accuracy': test_accuracy
         }
     
     print(f"\n{'='*60}")
@@ -766,8 +861,20 @@ def main():
     print(f"Training history and confusion matrix plots saved in '{RESULTS_DIR}/' as PNG files")
     print(f"{'='*60}")
     
-    return results, scaler
+    # Create a summary with training information
+    training_info = {
+        'training_data_percentage': training_data_percentage,
+        'training_set_size': len(X_train),
+        'validation_set_size': len(X_val),
+        'test_set_size': len(X_test),
+        'total_sequences': len(sequences)
+    }
+    
+    return results, scaler, training_info
 
 if __name__ == "__main__":
     # Run the complete pipeline
-    results, scaler = main()
+    # You can modify the training_data_percentage parameter here
+    # For example: main(50) will use only 50% of the allocated training data
+    training_percentage = 90  # Default: use 100% of training data
+    results, scaler, training_info = main(training_data_percentage=training_percentage)
