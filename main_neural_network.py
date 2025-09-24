@@ -24,6 +24,10 @@ from torch.nn.utils.rnn import pad_sequence
 import warnings
 warnings.filterwarnings('ignore')
 
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import GaussianNB
+from data_augmentation import generate_synthetic_data, augment_real_data
+
 # Create results directory
 RESULTS_DIR = "neural_network_results"
 os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -198,73 +202,7 @@ class CNNModel(nn.Module):
         output = self.fc(output)
         return output
 
-def generate_synthetic_data(num_samples=1000, sequence_length=25):
-    """Generate synthetic data for testing when no real CSV files are available"""
-    print("Generating synthetic data for demonstration...")
-    
-    data = []
-    for i in range(num_samples):
-        # Simulate group and repetition indices
-        group_idx = np.random.randint(0, 10)
-        rep_idx = np.random.randint(0, 5)
-        
-        # Generate sequence
-        sequence = []
-        baseline_wl = 1550.0 + np.random.normal(0, 0.1)  # Baseline wavelength
-        
-        for t in range(sequence_length):
-            # Simulate increasing strain/displacement over time
-            time_factor = t / sequence_length
-            
-            # WL_ch2 increases with strain (realistic for FBG sensors)
-            wl_ch2 = baseline_wl + time_factor * np.random.uniform(0.1, 2.0) + np.random.normal(0, 0.01)
-            wl_ch2_std = np.random.uniform(0.001, 0.01)
-            
-            # Mechanical features
-            force = time_factor * np.random.uniform(50, 500) + np.random.normal(0, 5)
-            displacement = time_factor * np.random.uniform(1, 10) + np.random.normal(0, 0.1)
-            air_pressure = np.random.uniform(1, 6)  # Bar
-            
-            # Calculate delta WL
-            delta_wl_ch2 = wl_ch2 - baseline_wl
-            
-            # Calculate rates (simple differences)
-            if t > 0:
-                prev_delta = sequence[-1][2]  # Previous delta_wl_ch2
-                prev_disp = sequence[-1][4]   # Previous displacement
-                delta_wl_rate = delta_wl_ch2 - prev_delta
-                delta_disp_rate = displacement - prev_disp
-            else:
-                delta_wl_rate = 0
-                delta_disp_rate = 0
-            
-            # Randomly assign small sample status for synthetic data
-            is_small_sample = np.random.choice([0, 1], p=[0.7, 0.3])  # 30% chance of small sample
-            
-            sequence.append([wl_ch2, wl_ch2_std, delta_wl_ch2, force, displacement, air_pressure, 
-                           delta_wl_rate, delta_disp_rate, is_small_sample])
-        
-        # Assign crack label based on maximum displacement/strain
-        max_displacement = max([s[4] for s in sequence])
-        if max_displacement < 2:
-            crack_label = 0  # No crack
-        elif max_displacement < 5:
-            crack_label = 1  # Small crack
-        elif max_displacement < 8:
-            crack_label = 2  # Medium crack
-        else:
-            crack_label = 3  # Large crack
-        
-        data.append({
-            'group_index': group_idx,
-            'repetition_index': rep_idx,
-            'sequence': np.array(sequence),
-            'crack_label': crack_label
-        })
-    
-    return data
-
-def load_and_preprocess_data(data_dir="./", prediction_horizon=5):
+def load_and_preprocess_data(data_dir="./", prediction_horizon=5, allow_synthetic_fallback=True):
     """Load CSV files and preprocess data for neural network training"""
     
     # Look for merged CSV files in current directory first
@@ -307,8 +245,12 @@ def load_and_preprocess_data(data_dir="./", prediction_horizon=5):
         print(f"Found {len(latest_csv_files)} CSV files in latest directory")
     
     if not csv_files:
-        print("No merged CSV files found. Using synthetic data for demonstration.")
-        return generate_synthetic_data()
+        print("No merged CSV files found.")
+        if allow_synthetic_fallback:
+            print("Using synthetic data for demonstration.")
+            return generate_synthetic_data()
+        else:
+            return []
     
     print(f"Found {len(csv_files)} CSV files")
     
@@ -398,8 +340,12 @@ def load_and_preprocess_data(data_dir="./", prediction_horizon=5):
             continue
     
     if not all_data:
-        print("No valid data found in CSV files. Using synthetic data.")
-        return generate_synthetic_data()
+        print("No valid data found in CSV files.")
+        if allow_synthetic_fallback:
+            print("Using synthetic data.")
+            return generate_synthetic_data()
+        else:
+            return []
     
     return all_data
 
@@ -586,6 +532,74 @@ def train_model(model, train_loader, val_loader, num_epochs=50, learning_rate=0.
     
     return train_losses, val_losses
 
+def plot_and_report_metrics(true_labels, predicted_labels, model_name, class_names=None, training_percentage=100):
+    """Helper function to plot and report metrics."""
+    
+    # Determine class names based on actual data
+    unique_classes = sorted(set(true_labels + predicted_labels))
+    if class_names is None:
+        default_names = ['No Crack', 'Small', 'Medium', 'Large']
+        class_names = [default_names[i] if i < len(default_names) else f'Class {i}' for i in unique_classes]
+    
+    # Detailed per-class results with percentages
+    print(f"\nDetailed Per-Class Test Results:")
+    print("-" * 60)
+    
+    # Calculate per-class statistics
+    for i, class_idx in enumerate(unique_classes):
+        class_name = class_names[i] if i < len(class_names) else f'Class {class_idx}'
+        
+        # True positives, false positives, false negatives
+        true_samples = [j for j, label in enumerate(true_labels) if label == class_idx]
+        predicted_samples = [j for j, pred in enumerate(predicted_labels) if pred == class_idx]
+        
+        true_count = len(true_samples)
+        predicted_count = len(predicted_samples)
+        correct_class = sum(1 for j in true_samples if predicted_labels[j] == class_idx)
+        
+        if true_count > 0:
+            class_recall = (correct_class / true_count) * 100
+        else:
+            class_recall = 0.0
+            
+        if predicted_count > 0:
+            class_precision = (correct_class / predicted_count) * 100
+        else:
+            class_precision = 0.0
+        
+        print(f"{class_name} (Class {class_idx}):")
+        print(f"  - True samples: {true_count} ({(true_count/len(true_labels))*100:.1f}% of total)")
+        print(f"  - Correctly predicted: {correct_class}")
+        print(f"  - Recall (Sensitivity): {class_recall:.2f}%")
+        print(f"  - Precision: {class_precision:.2f}%")
+        print()
+    
+    # Ensure all predicted labels are covered in the class_names
+    all_unique_labels = sorted(list(set(true_labels) | set(predicted_labels)))
+    final_class_names = [class_names[i] if i < len(class_names) else f'Class {i}' for i in all_unique_labels]
+    
+    print(classification_report(true_labels, predicted_labels, target_names=final_class_names, labels=all_unique_labels))
+    
+    # Confusion matrix
+    cm = confusion_matrix(true_labels, predicted_labels)
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                xticklabels=final_class_names, yticklabels=final_class_names)
+    plt.title(f'{model_name} - Confusion Matrix')
+    plt.ylabel('True Label')
+    plt.xlabel('Predicted Label')
+    plt.tight_layout()
+    plt.savefig(os.path.join(RESULTS_DIR, f'{model_name}_confusion_matrix_{training_percentage}pct.png'), dpi=300, bbox_inches='tight')
+    plt.close()  # Close the figure to free memory
+    
+    # Log final test accuracy for easy reference
+    overall_accuracy = 100 * sum(1 for true, pred in zip(true_labels, predicted_labels) if true == pred) / len(true_labels)
+    print(f"\n{'='*60}")
+    print(f"FINAL TEST ACCURACY: {overall_accuracy:.2f}%")
+    print(f"{'='*60}")
+    
+    return overall_accuracy
+
 def evaluate_model(model, test_loader, class_names=None, training_percentage=100):
     """Evaluate model performance on test set"""
     
@@ -604,78 +618,30 @@ def evaluate_model(model, test_loader, class_names=None, training_percentage=100
             all_predictions.extend(predicted.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
             all_probabilities.extend(probabilities.cpu().numpy())
-    
-    # Calculate overall accuracy
-    total_samples = len(all_labels)
-    correct_predictions = sum(1 for true, pred in zip(all_labels, all_predictions) if true == pred)
-    overall_accuracy = (correct_predictions / total_samples) * 100
-    
-    print(f"\n{model.__class__.__name__} Test Results Summary:")
-    print("=" * 60)
-    print(f"Total Test Samples: {total_samples}")
-    print(f"Correct Predictions: {correct_predictions}")
-    print(f"Overall Test Accuracy: {overall_accuracy:.2f}%")
-    print("=" * 60)
-    
-    # Determine class names based on actual data
-    unique_classes = sorted(set(all_labels + all_predictions))
-    if class_names is None:
-        default_names = ['No Crack', 'Small', 'Medium', 'Large']
-        class_names = [default_names[i] if i < len(default_names) else f'Class {i}' for i in unique_classes]
-    
-    # Detailed per-class results with percentages
-    print(f"\nDetailed Per-Class Test Results:")
-    print("-" * 60)
-    
-    # Calculate per-class statistics
-    for i, class_idx in enumerate(unique_classes):
-        class_name = class_names[i] if i < len(class_names) else f'Class {class_idx}'
-        
-        # True positives, false positives, false negatives
-        true_samples = [j for j, label in enumerate(all_labels) if label == class_idx]
-        predicted_samples = [j for j, pred in enumerate(all_predictions) if pred == class_idx]
-        
-        true_count = len(true_samples)
-        predicted_count = len(predicted_samples)
-        correct_class = sum(1 for j in true_samples if all_predictions[j] == class_idx)
-        
-        if true_count > 0:
-            class_recall = (correct_class / true_count) * 100
-        else:
-            class_recall = 0.0
-            
-        if predicted_count > 0:
-            class_precision = (correct_class / predicted_count) * 100
-        else:
-            class_precision = 0.0
-        
-        print(f"{class_name} (Class {class_idx}):")
-        print(f"  - True samples: {true_count} ({(true_count/total_samples)*100:.1f}% of total)")
-        print(f"  - Correctly predicted: {correct_class}")
-        print(f"  - Recall (Sensitivity): {class_recall:.2f}%")
-        print(f"  - Precision: {class_precision:.2f}%")
-        print()
-    
-    print(classification_report(all_labels, all_predictions, target_names=class_names[:len(unique_classes)]))
-    
-    # Confusion matrix
-    cm = confusion_matrix(all_labels, all_predictions)
-    plt.figure(figsize=(8, 6))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                xticklabels=class_names[:len(unique_classes)], yticklabels=class_names[:len(unique_classes)])
-    plt.title(f'{model.__class__.__name__} - Confusion Matrix')
-    plt.ylabel('True Label')
-    plt.xlabel('Predicted Label')
-    plt.tight_layout()
-    plt.savefig(os.path.join(RESULTS_DIR, f'{model.__class__.__name__}_confusion_matrix_{training_percentage}pct.png'), dpi=300, bbox_inches='tight')
-    plt.close()  # Close the figure to free memory
-    
-    # Log final test accuracy for easy reference
-    print(f"\n{'='*60}")
-    print(f"FINAL TEST ACCURACY: {overall_accuracy:.2f}%")
-    print(f"{'='*60}")
+
+    overall_accuracy = plot_and_report_metrics(
+        all_labels, all_predictions, model.__class__.__name__, 
+        class_names=class_names, training_percentage=training_percentage
+    )
     
     return all_predictions, all_labels, all_probabilities, overall_accuracy
+
+def evaluate_sklearn_model(model, X_test, y_test, model_name, class_names=None, training_percentage=100):
+    """Evaluate scikit-learn model performance on the test set."""
+    
+    # Reshape data for scikit-learn (flatten sequences)
+    X_test_flat = np.array(X_test).reshape(len(X_test), -1)
+        
+    all_predictions = model.predict(X_test_flat)
+    all_probabilities = model.predict_proba(X_test_flat)
+    all_labels = y_test
+    
+    overall_accuracy = plot_and_report_metrics(
+        all_labels, all_predictions, model_name, 
+        class_names=class_names, training_percentage=training_percentage
+    )
+    
+    return list(all_predictions), all_labels, all_probabilities, overall_accuracy
 
 def plot_training_history(train_losses, val_losses, model_name):
     """Plot training and validation loss curves"""
@@ -692,121 +658,154 @@ def plot_training_history(train_losses, val_losses, model_name):
     plt.savefig(os.path.join(RESULTS_DIR, f'{model_name}_training_history.png'), dpi=300, bbox_inches='tight')
     plt.close()  # Close the figure to free memory
 
-def main(training_data_percentage=100):
+def main(training_data_percentage=100, augment_with_synthetic=True, num_synthetic_samples=2000, augment_real=True, real_augmentation_factor=2):
     """Main execution pipeline
     
     Args:
         training_data_percentage (int): Percentage of training data to actually use for training (0-100).
-                                      For example, if 50, only 50% of the allocated training data will be used.
-                                      Test and validation set sizes remain constant.
+        augment_with_synthetic (bool): If True, generate and add synthetic data.
+        num_synthetic_samples (int): Number of synthetic samples to generate.
+        augment_real (bool): If True, augment the real data using jittering and scaling.
+        real_augmentation_factor (int): How many augmented versions to create for each real sample.
     """
     
     print("Structural Health Monitoring - Crack Prediction Pipeline")
     print("=" * 60)
     print(f"Training Data Usage: {training_data_percentage}% of allocated training data will be used")
+    print(f"Data Augmentation: Synthetic={augment_with_synthetic}, Real={augment_real}")
     print("=" * 60)
     
-    # 1. Load and preprocess data
-    print("\n1. Loading and preprocessing data...")
-    data = load_and_preprocess_data()
-    print(f"Loaded {len(data)} sequences")
+    # 1. Load and preprocess REAL data
+    print("\n1. Loading and preprocessing real data...")
+    real_data = load_and_preprocess_data(allow_synthetic_fallback=augment_with_synthetic)
+    print(f"Loaded {len(real_data)} real data sequences")
     
-    # 2. Create sequences and labels
-    print("\n2. Creating sequences and labels...")
-    sequence_length = 50  # Define sequence length here
-    sequences, labels = create_sequences_and_labels(data, sequence_length=sequence_length)
-    print(f"Created {len(sequences)} training sequences")
-    
-    if not sequences:
-        print("Could not create any sequences. Exiting.")
-        return None, None
+    if not real_data:
+        print("No real data found. Exiting.")
+        return None, None, None
 
-    # Check label distribution
-    unique_labels, counts = np.unique(labels, return_counts=True)
-    print(f"Label distribution: {dict(zip(unique_labels, counts))}")
+    # 2. Create sequences and labels from REAL data
+    print("\n2. Creating sequences and labels from real data...")
+    sequence_length = 50  # Define sequence length here
+    real_sequences, real_labels = create_sequences_and_labels(real_data, sequence_length=sequence_length)
+    print(f"Created {len(real_sequences)} real training sequences")
     
-    # 3. Normalize features
-    print("\n3. Normalizing features...")
-    sequences, scaler = normalize_features(sequences)
-    
-    # 4. Split data
-    print("\n4. Splitting data...")
+    if not real_sequences:
+        print("Could not create any sequences from real data. Exiting.")
+        return None, None, None
+
+    # 3. Split REAL data into Train, Validation, and Test sets
+    print("\n3. Splitting real data into train, validation, and test sets...")
     
     # Check if we have enough samples for stratified splitting
-    unique_labels, counts = np.unique(labels, return_counts=True)
+    unique_labels, counts = np.unique(real_labels, return_counts=True)
     min_count = min(counts)
     
-    if min_count >= 2 and len(sequences) > 10:
-        # Use stratified split if we have enough samples
+    X_train, y_train = [], []
+    X_val, y_val = [], []
+    X_test, y_test = [], []
+
+    if min_count >= 2 and len(real_sequences) > 10:
+        # Stratified split for train/test
         X_temp, X_test, y_temp, y_test = train_test_split(
-            sequences, labels, test_size=0.15, stratify=labels, random_state=42
+            real_sequences, real_labels, test_size=0.2, stratify=real_labels, random_state=42
         )
-        
-        # Check if we can stratify the validation split too
-        unique_temp, temp_counts = np.unique(y_temp, return_counts=True)
-        if min(temp_counts) >= 2:
-            X_train, X_val, y_train, y_val = train_test_split(
-                X_temp, y_temp, test_size=0.176, stratify=y_temp, random_state=42
-            )
-        else:
-            X_train, X_val, y_train, y_val = train_test_split(
-                X_temp, y_temp, test_size=0.176, random_state=42
-            )
-    else:
-        # Use simple random split for small datasets
-        print("Warning: Small dataset detected, using random split instead of stratified split")
-        X_temp, X_test, y_temp, y_test = train_test_split(
-            sequences, labels, test_size=0.2, random_state=42  # Slightly larger test set
-        )
-        
+        # Stratified split for train/val
         X_train, X_val, y_train, y_val = train_test_split(
-            X_temp, y_temp, test_size=0.25, random_state=42  # 25% of 80% = 20% total for val
+            X_temp, y_temp, test_size=0.25, stratify=y_temp, random_state=42 # 0.25 * 0.8 = 0.2
         )
-    
+    else:
+        print("Warning: Small dataset, using random split.")
+        X_temp, X_test, y_temp, y_test = train_test_split(real_sequences, real_labels, test_size=0.2, random_state=42)
+        X_train, X_val, y_train, y_val = train_test_split(X_temp, y_temp, test_size=0.25, random_state=42)
+
     print(f"Initial Split - Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
     
-    # 4.1 Apply training data percentage reduction
+    # 4. Normalize features based on the TRAINING set ONLY
+    print("\n4. Normalizing features...")
+    # Flatten only the training sequences to fit the scaler
+    train_features_flat = np.concatenate([seq for seq in X_train], axis=0)
+    scaler = StandardScaler()
+    scaler.fit(train_features_flat)
+    
+    # Apply the fitted scaler to all sets
+    X_train = [scaler.transform(seq) for seq in X_train]
+    X_val = [scaler.transform(seq) for seq in X_val]
+    X_test = [scaler.transform(seq) for seq in X_test]
+    print("Scaler fitted on training data and applied to all sets.")
+    
+    # 5. Data Augmentation on the TRAINING set ONLY
+    print("\n5. Augmenting the training set...")
+    
+    # Keep track of original training data for augmentation
+    original_X_train = list(X_train)
+    original_y_train = list(y_train)
+
+    # Augment real training data
+    if augment_real and original_X_train:
+        # Note: augment_real_data expects un-normalized data, but for simplicity here we augment normalized data.
+        # A more rigorous approach would be to augment first, then normalize all training data together.
+        augmented_real = augment_real_data([{'sequence': seq, 'crack_label': lbl} for seq, lbl in zip(original_X_train, original_y_train)],
+                                           augmentation_factor=real_augmentation_factor)
+        
+        # Extract sequences and labels from augmented data
+        X_train_augmented_real = [item['sequence'] for item in augmented_real]
+        y_train_augmented_real = [item['crack_label'] for item in augmented_real]
+        
+        X_train.extend(X_train_augmented_real)
+        y_train.extend(y_train_augmented_real)
+        print(f"  - Added {len(X_train_augmented_real)} augmented real samples to training set.")
+
+    # Generate and add synthetic data
+    if augment_with_synthetic:
+        synthetic_data = generate_synthetic_data(num_samples=num_synthetic_samples, sequence_length=sequence_length)
+        
+        # Create sequences and labels from synthetic data
+        X_synthetic, y_synthetic = create_sequences_and_labels(synthetic_data, sequence_length=sequence_length)
+        
+        if X_synthetic:
+            # Normalize synthetic data with the SAME scaler from training data
+            X_synthetic = [scaler.transform(seq) for seq in X_synthetic]
+            
+            X_train.extend(X_synthetic)
+            y_train.extend(y_synthetic)
+            print(f"  - Added {len(X_synthetic)} synthetic samples to training set.")
+    
+    print(f"Total training samples after augmentation: {len(X_train)}")
+    
+    # 6. Apply training data percentage reduction (if specified)
     if training_data_percentage < 100:
-        print(f"\n4.1 Reducing training data to {training_data_percentage}%...")
+        print(f"\n6. Reducing training data to {training_data_percentage}%...")
         original_train_size = len(X_train)
         target_train_size = int((training_data_percentage / 100) * original_train_size)
         
         if target_train_size > 0:
-            # Use stratified sampling if possible for consistent class distribution
-            unique_train_labels, train_counts = np.unique(y_train, return_counts=True)
-            min_train_count = min(train_counts)
-            
-            if min_train_count >= 2 and target_train_size >= len(unique_train_labels):
-                # Use stratified sampling
-                X_train_reduced, _, y_train_reduced, _ = train_test_split(
+            # Use stratified sampling to maintain class distribution
+            try:
+                X_train, _, y_train, _ = train_test_split(
                     X_train, y_train, 
                     train_size=target_train_size, 
                     stratify=y_train, 
                     random_state=42
                 )
-            else:
-                # Use random sampling
-                X_train_reduced, _, y_train_reduced, _ = train_test_split(
+                print(f"Reduced training set from {original_train_size} to {len(X_train)} samples.")
+            except ValueError:
+                print("Warning: Cannot stratify reduced training set, using random split.")
+                X_train, _, y_train, _ = train_test_split(
                     X_train, y_train, 
                     train_size=target_train_size, 
                     random_state=42
                 )
-            
-            X_train = X_train_reduced
-            y_train = y_train_reduced
-            
-            print(f"Reduced training set from {original_train_size} to {len(X_train)} samples")
-            print(f"Unused training data: {original_train_size - len(X_train)} samples")
         else:
-            print("Warning: Training data percentage too low, keeping at least 1 sample")
-            X_train = X_train[:1] if len(X_train) > 0 else X_train
-            y_train = y_train[:1] if len(y_train) > 0 else y_train
+            print("Warning: Training data percentage too low, keeping at least 1 sample.")
+            X_train, y_train = X_train[:1], y_train[:1]
+
+    # 7. Final Data Check and Loader Creation
+    print("\n7. Final data check and loader creation...")
+    print(f"Final Data Split - Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
     
-    print(f"Final Split - Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
-    print(f"Total data distribution: Train {(len(X_train)/(len(X_train)+len(X_val)+len(X_test)))*100:.1f}%, Val {(len(X_val)/(len(X_train)+len(X_val)+len(X_test)))*100:.1f}%, Test {(len(X_test)/(len(X_train)+len(X_val)+len(X_test)))*100:.1f}%")
-    
-    # 5. Create data loaders
-    batch_size = min(8, len(X_train)) if len(X_train) > 0 else 1 # Smaller batch size for small dataset
+    # Create data loaders
+    batch_size = 16
     
     train_dataset = SequenceDataset(X_train, y_train, sequence_length)
     val_dataset = SequenceDataset(X_val, y_val, sequence_length)
@@ -825,27 +824,42 @@ def main(training_data_percentage=100):
         #'LSTM': LSTMModel(input_size=input_size, num_classes=num_classes),
         #'CNN_GRU': CNNGRUModel(input_size=input_size, num_classes=num_classes),
         #'Transformer': TransformerModel(input_size=input_size, num_classes=num_classes),
+        'KNN': KNeighborsClassifier(n_neighbors=5, n_jobs=-1),
+        'Bayesian': GaussianNB(),
         'CNN': CNNModel(input_size=input_size, num_classes=num_classes)
+        
     }
     
-    # 7. Train and evaluate models
+    # 9. Train and evaluate models
     results = {}
     
     for model_name, model in models.items():
         print(f"\n{'='*60}")
-        print(f"Training {model_name} Model")
+        print(f"Processing {model_name} Model")
         print(f"{'='*60}")
-        
-        # Train model
-        train_losses, val_losses = train_model(model, train_loader, val_loader)
-        plot_training_history(train_losses, val_losses, model_name)
-        
-        # Load best model
-        model.load_state_dict(torch.load(os.path.join(RESULTS_DIR, f'best_{model.__class__.__name__}.pth')))
-        model = model.to(device)
-        
-        # Evaluate model
-        predictions, true_labels, probabilities, test_accuracy = evaluate_model(model, test_loader, training_percentage=training_data_percentage)
+
+        if isinstance(model, (KNeighborsClassifier, GaussianNB)):
+            print(f"Fitting {model_name} model...")
+            X_train_flat = np.array(X_train).reshape(len(X_train), -1)
+            model.fit(X_train_flat, y_train)
+            print(f"{model_name} model fitted.")
+            
+            # Evaluate model
+            predictions, true_labels, probabilities, test_accuracy = evaluate_sklearn_model(
+                model, X_test, y_test, model_name, 
+                training_percentage=training_data_percentage
+            )
+        else: # PyTorch models
+            # Train model
+            train_losses, val_losses = train_model(model, train_loader, val_loader)
+            plot_training_history(train_losses, val_losses, model_name)
+            
+            # Load best model
+            model.load_state_dict(torch.load(os.path.join(RESULTS_DIR, f'best_{model.__class__.__name__}.pth')))
+            model = model.to(device)
+            
+            # Evaluate model
+            predictions, true_labels, probabilities, test_accuracy = evaluate_model(model, test_loader, training_percentage=training_data_percentage)
         
         results[model_name] = {
             'model': model,
@@ -867,7 +881,7 @@ def main(training_data_percentage=100):
         'training_set_size': len(X_train),
         'validation_set_size': len(X_val),
         'test_set_size': len(X_test),
-        'total_sequences': len(sequences)
+        'total_sequences': len(real_sequences) # Use original real_sequences count
     }
     
     return results, scaler, training_info
@@ -876,5 +890,20 @@ if __name__ == "__main__":
     # Run the complete pipeline
     # You can modify the training_data_percentage parameter here
     # For example: main(50) will use only 50% of the allocated training data
-    training_percentage = 90  # Default: use 100% of training data
-    results, scaler, training_info = main(training_data_percentage=training_percentage)
+    training_percentage = 100  # Default: use 100% of training data
+    
+    # --- Data Augmentation Settings ---
+    # Set to True to generate and use synthetic data, or False to use only real data.
+    AUGMENT_WITH_SYNTHETIC = False
+    NUM_SYNTHETIC_SAMPLES = 2000
+    AUGMENT_REAL_DATA = False
+    REAL_AUGMENTATION_FACTOR = 2
+    # ------------------------------------
+
+    results, scaler, training_info = main(
+        training_data_percentage=training_percentage,
+        augment_with_synthetic=AUGMENT_WITH_SYNTHETIC,
+        num_synthetic_samples=NUM_SYNTHETIC_SAMPLES,
+        augment_real=AUGMENT_REAL_DATA,
+        real_augmentation_factor=REAL_AUGMENTATION_FACTOR
+    )

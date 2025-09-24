@@ -228,7 +228,7 @@ def plot_selective_force_vs_displacement(df: pd.DataFrame, output_dir: str,
 
     df = ensure_numeric(df, required_cols)
 
-    plt.figure(figsize=(12, 8))
+    plt.figure(figsize=(14, 10))
     
     # Plot each dataset
     colors = ['blue', 'green', 'orange', 'purple', 'brown', 'pink']
@@ -272,23 +272,23 @@ def plot_selective_force_vs_displacement(df: pd.DataFrame, output_dir: str,
         
         # Plot scatter points only (no lines)
         plt.scatter(group["Displacement (mm)"], group["Force (N)"], 
-                   color=color, marker=marker, s=40, alpha=0.9, edgecolors='black', linewidth=0.5, label=label)
+                   color=color, marker=marker, s=160, alpha=0.9, edgecolors='black', linewidth=2.0, label=label)
 
     # Add extrapolation line if provided
     if extrapolation_data is not None:
         x_ext, y_ext = extrapolation_data
-        plt.plot(x_ext, y_ext, '--', color='red', linewidth=1.5, alpha=0.8,
-                label='Linear Extrapolation (6-s)')
+        plt.plot(x_ext, y_ext, '--', color='red', linewidth=2.5, alpha=0.8,
+                label='Linear Fit')
 
-    plt.xlabel("Displacement (mm)", fontsize=12)
-    plt.ylabel("Force (N)", fontsize=12)
-    plt.title("Force vs. Displacement", fontsize=14)
+    plt.xlabel("Displacement (mm)", fontsize=24)
+    plt.ylabel("Force (N)", fontsize=24)
+    plt.title("Force vs. Displacement", fontsize=24)
     plt.grid(True, linestyle=":", alpha=0.7)
-    plt.legend(fontsize=10)
+    plt.legend(fontsize=24)
 
     out_path = os.path.join(output_dir, "selective_force_vs_displacement.png")
     plt.tight_layout()
-    plt.savefig(out_path, dpi=150)
+    plt.savefig(out_path, dpi=200)
     plt.close()
     return out_path
 
@@ -301,7 +301,7 @@ def plot_selective_strain_vs_displacement(df: pd.DataFrame, strain_col: str, out
     if missing:
         raise KeyError("Missing required columns: " + ", ".join(missing))
 
-    plt.figure(figsize=(12, 8))
+    plt.figure(figsize=(14, 10))
     
     # Plot each dataset
     colors = ['blue', 'green', 'orange', 'purple', 'brown', 'pink']
@@ -345,23 +345,23 @@ def plot_selective_strain_vs_displacement(df: pd.DataFrame, strain_col: str, out
         
         # Plot scatter points only (no lines)
         plt.scatter(group["Displacement (mm)"], group[strain_col], 
-                   color=color, marker=marker, s=40, alpha=0.9, edgecolors='black', linewidth=0.5, label=label)
+                   color=color, marker=marker, s=160, alpha=0.9, edgecolors='black', linewidth=2.0, label=label)
 
     # Add extrapolation line if provided
     if extrapolation_data is not None:
         x_ext, y_ext = extrapolation_data
-        plt.plot(x_ext, y_ext, '--', color='red', linewidth=1.5, alpha=0.8,
-                label='Linear Extrapolation (6-s)')
+        plt.plot(x_ext, y_ext, '--', color='red', linewidth=2.5, alpha=0.8,
+                label='Linear Fit')
 
-    plt.xlabel("Displacement (mm)", fontsize=12)
-    plt.ylabel("Strain [με]", fontsize=12)
-    plt.title("Strain vs. Displacement", fontsize=14)
+    plt.xlabel("Displacement (mm)", fontsize=24)
+    plt.ylabel("Strain [με]", fontsize=24)
+    plt.title("Strain vs. Displacement", fontsize=24)
     plt.grid(True, linestyle=":", alpha=0.7)
-    plt.legend(fontsize=10)
+    plt.legend(fontsize=24)
 
     out_path = os.path.join(output_dir, "selective_strain_vs_displacement.png")
     plt.tight_layout()
-    plt.savefig(out_path, dpi=150)
+    plt.savefig(out_path, dpi=200)
     plt.close()
     return out_path
 
