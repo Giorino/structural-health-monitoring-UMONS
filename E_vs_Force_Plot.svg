@@ -1,0 +1,113 @@
+<svg width="800" height="600" xmlns="http://www.w3.org/2000/svg" style="background-color:white; font-family:Arial, sans-serif;">
+<text x="400.0" y="40.0" text-anchor="middle" font-size="20" font-weight="bold">Young's Modulus (E) vs Force</text>
+<line x1="80" y1="520" x2="720" y2="520" stroke="black" stroke-width="2"/>
+<line x1="80" y1="520" x2="80" y2="80" stroke="black" stroke-width="2"/>
+<line x1="80.0" y1="520" x2="80.0" y2="80" stroke="#eee" stroke-width="1"/>
+<line x1="80.0" y1="520" x2="80.0" y2="525" stroke="black" stroke-width="1"/>
+<text x="80.0" y="540" text-anchor="middle" font-size="12">134</text>
+<line x1="144.00000000000006" y1="520" x2="144.00000000000006" y2="80" stroke="#eee" stroke-width="1"/>
+<line x1="144.00000000000006" y1="520" x2="144.00000000000006" y2="525" stroke="black" stroke-width="1"/>
+<text x="144.00000000000006" y="540" text-anchor="middle" font-size="12">146</text>
+<line x1="207.99999999999997" y1="520" x2="207.99999999999997" y2="80" stroke="#eee" stroke-width="1"/>
+<line x1="207.99999999999997" y1="520" x2="207.99999999999997" y2="525" stroke="black" stroke-width="1"/>
+<text x="207.99999999999997" y="540" text-anchor="middle" font-size="12">158</text>
+<line x1="272.0" y1="520" x2="272.0" y2="80" stroke="#eee" stroke-width="1"/>
+<line x1="272.0" y1="520" x2="272.0" y2="525" stroke="black" stroke-width="1"/>
+<text x="272.0" y="540" text-anchor="middle" font-size="12">171</text>
+<line x1="335.99999999999994" y1="520" x2="335.99999999999994" y2="80" stroke="#eee" stroke-width="1"/>
+<line x1="335.99999999999994" y1="520" x2="335.99999999999994" y2="525" stroke="black" stroke-width="1"/>
+<text x="335.99999999999994" y="540" text-anchor="middle" font-size="12">183</text>
+<line x1="400.0" y1="520" x2="400.0" y2="80" stroke="#eee" stroke-width="1"/>
+<line x1="400.0" y1="520" x2="400.0" y2="525" stroke="black" stroke-width="1"/>
+<text x="400.0" y="540" text-anchor="middle" font-size="12">195</text>
+<line x1="464.00000000000006" y1="520" x2="464.00000000000006" y2="80" stroke="#eee" stroke-width="1"/>
+<line x1="464.00000000000006" y1="520" x2="464.00000000000006" y2="525" stroke="black" stroke-width="1"/>
+<text x="464.00000000000006" y="540" text-anchor="middle" font-size="12">207</text>
+<line x1="528.0" y1="520" x2="528.0" y2="80" stroke="#eee" stroke-width="1"/>
+<line x1="528.0" y1="520" x2="528.0" y2="525" stroke="black" stroke-width="1"/>
+<text x="528.0" y="540" text-anchor="middle" font-size="12">219</text>
+<line x1="592.0" y1="520" x2="592.0" y2="80" stroke="#eee" stroke-width="1"/>
+<line x1="592.0" y1="520" x2="592.0" y2="525" stroke="black" stroke-width="1"/>
+<text x="592.0" y="540" text-anchor="middle" font-size="12">232</text>
+<line x1="656.0000000000001" y1="520" x2="656.0000000000001" y2="80" stroke="#eee" stroke-width="1"/>
+<line x1="656.0000000000001" y1="520" x2="656.0000000000001" y2="525" stroke="black" stroke-width="1"/>
+<text x="656.0000000000001" y="540" text-anchor="middle" font-size="12">244</text>
+<line x1="720.0" y1="520" x2="720.0" y2="80" stroke="#eee" stroke-width="1"/>
+<line x1="720.0" y1="520" x2="720.0" y2="525" stroke="black" stroke-width="1"/>
+<text x="720.0" y="540" text-anchor="middle" font-size="12">256</text>
+<line x1="80" y1="520.0" x2="720" y2="520.0" stroke="#eee" stroke-width="1"/>
+<line x1="80" y1="520.0" x2="75" y2="520.0" stroke="black" stroke-width="1"/>
+<text x="70" y="524.0" text-anchor="end" font-size="12">16.0</text>
+<line x1="80" y1="476.0" x2="720" y2="476.0" stroke="#eee" stroke-width="1"/>
+<line x1="80" y1="476.0" x2="75" y2="476.0" stroke="black" stroke-width="1"/>
+<text x="70" y="480.0" text-anchor="end" font-size="12">16.5</text>
+<line x1="80" y1="432.0" x2="720" y2="432.0" stroke="#eee" stroke-width="1"/>
+<line x1="80" y1="432.0" x2="75" y2="432.0" stroke="black" stroke-width="1"/>
+<text x="70" y="436.0" text-anchor="end" font-size="12">17.0</text>
+<line x1="80" y1="388.0" x2="720" y2="388.0" stroke="#eee" stroke-width="1"/>
+<line x1="80" y1="388.0" x2="75" y2="388.0" stroke="black" stroke-width="1"/>
+<text x="70" y="392.0" text-anchor="end" font-size="12">17.5</text>
+<line x1="80" y1="344.0" x2="720" y2="344.0" stroke="#eee" stroke-width="1"/>
+<line x1="80" y1="344.0" x2="75" y2="344.0" stroke="black" stroke-width="1"/>
+<text x="70" y="348.0" text-anchor="end" font-size="12">18.0</text>
+<line x1="80" y1="300.0" x2="720" y2="300.0" stroke="#eee" stroke-width="1"/>
+<line x1="80" y1="300.0" x2="75" y2="300.0" stroke="black" stroke-width="1"/>
+<text x="70" y="304.0" text-anchor="end" font-size="12">18.5</text>
+<line x1="80" y1="256.0" x2="720" y2="256.0" stroke="#eee" stroke-width="1"/>
+<line x1="80" y1="256.0" x2="75" y2="256.0" stroke="black" stroke-width="1"/>
+<text x="70" y="260.0" text-anchor="end" font-size="12">19.0</text>
+<line x1="80" y1="212.0" x2="720" y2="212.0" stroke="#eee" stroke-width="1"/>
+<line x1="80" y1="212.0" x2="75" y2="212.0" stroke="black" stroke-width="1"/>
+<text x="70" y="216.0" text-anchor="end" font-size="12">19.5</text>
+<line x1="80" y1="168.0" x2="720" y2="168.0" stroke="#eee" stroke-width="1"/>
+<line x1="80" y1="168.0" x2="75" y2="168.0" stroke="black" stroke-width="1"/>
+<text x="70" y="172.0" text-anchor="end" font-size="12">20.0</text>
+<line x1="80" y1="124.0" x2="720" y2="124.0" stroke="#eee" stroke-width="1"/>
+<line x1="80" y1="124.0" x2="75" y2="124.0" stroke="black" stroke-width="1"/>
+<text x="70" y="128.0" text-anchor="end" font-size="12">20.5</text>
+<line x1="80" y1="80.0" x2="720" y2="80.0" stroke="#eee" stroke-width="1"/>
+<line x1="80" y1="80.0" x2="75" y2="80.0" stroke="black" stroke-width="1"/>
+<text x="70" y="84.0" text-anchor="end" font-size="12">21.0</text>
+<text x="400.0" y="580" text-anchor="middle" font-size="14" font-weight="bold">Force (N)</text>
+<text x="20" y="300.0" text-anchor="middle" transform="rotate(-90 20,300.0)" font-size="14" font-weight="bold">Young's Modulus (GPa)</text>
+<line x1="133.3333333333333" y1="280.93791500122614" x2="133.3333333333333" y2="310.1436500116244" stroke="black" stroke-width="1.5"/>
+<line x1="129.3333333333333" y1="280.93791500122614" x2="137.3333333333333" y2="280.93791500122614" stroke="black" stroke-width="1.5"/>
+<line x1="129.3333333333333" y1="310.1436500116244" x2="137.3333333333333" y2="310.1436500116244" stroke="black" stroke-width="1.5"/>
+<circle cx="133.3333333333333" cy="295.5407825064253" r="4" fill="blue" stroke="black" stroke-width="1"/>
+<line x1="138.56209150326794" y1="267.93882264177864" x2="138.56209150326794" y2="309.28649586466645" stroke="black" stroke-width="1.5"/>
+<line x1="134.56209150326794" y1="267.93882264177864" x2="142.56209150326794" y2="267.93882264177864" stroke="black" stroke-width="1.5"/>
+<line x1="134.56209150326794" y1="309.28649586466645" x2="142.56209150326794" y2="309.28649586466645" stroke="black" stroke-width="1.5"/>
+<circle cx="138.56209150326794" cy="288.61265925322255" r="4" fill="blue" stroke="black" stroke-width="1"/>
+<line x1="232.67973856209147" y1="287.2362537406151" x2="232.67973856209147" y2="310.8951719799461" stroke="black" stroke-width="1.5"/>
+<line x1="228.67973856209147" y1="287.2362537406151" x2="236.67973856209147" y2="287.2362537406151" stroke="black" stroke-width="1.5"/>
+<line x1="228.67973856209147" y1="310.8951719799461" x2="236.67973856209147" y2="310.8951719799461" stroke="black" stroke-width="1.5"/>
+<circle cx="232.67973856209147" cy="299.06571286028066" r="4" fill="blue" stroke="black" stroke-width="1"/>
+<line x1="248.3660130718954" y1="260.58050854526334" x2="248.3660130718954" y2="284.6288496640651" stroke="black" stroke-width="1.5"/>
+<line x1="244.3660130718954" y1="260.58050854526334" x2="252.3660130718954" y2="260.58050854526334" stroke="black" stroke-width="1.5"/>
+<line x1="244.3660130718954" y1="284.6288496640651" x2="252.3660130718954" y2="284.6288496640651" stroke="black" stroke-width="1.5"/>
+<circle cx="248.3660130718954" cy="272.6046791046642" r="4" fill="blue" stroke="black" stroke-width="1"/>
+<line x1="347.71241830065355" y1="261.5677789210151" x2="347.71241830065355" y2="302.42836681521686" stroke="black" stroke-width="1.5"/>
+<line x1="343.71241830065355" y1="261.5677789210151" x2="351.71241830065355" y2="261.5677789210151" stroke="black" stroke-width="1.5"/>
+<line x1="343.71241830065355" y1="302.42836681521686" x2="351.71241830065355" y2="302.42836681521686" stroke="black" stroke-width="1.5"/>
+<circle cx="347.71241830065355" cy="281.99807286811597" r="4" fill="blue" stroke="black" stroke-width="1"/>
+<line x1="452.28758169934645" y1="224.20236670301932" x2="452.28758169934645" y2="252.75736201545664" stroke="black" stroke-width="1.5"/>
+<line x1="448.28758169934645" y1="224.20236670301932" x2="456.28758169934645" y2="224.20236670301932" stroke="black" stroke-width="1.5"/>
+<line x1="448.28758169934645" y1="252.75736201545664" x2="456.28758169934645" y2="252.75736201545664" stroke="black" stroke-width="1.5"/>
+<circle cx="452.28758169934645" cy="238.47986435923798" r="4" fill="blue" stroke="black" stroke-width="1"/>
+<line x1="467.97385620915037" y1="260.83331829779104" x2="467.97385620915037" y2="273.40822502833976" stroke="black" stroke-width="1.5"/>
+<line x1="463.97385620915037" y1="260.83331829779104" x2="471.97385620915037" y2="260.83331829779104" stroke="black" stroke-width="1.5"/>
+<line x1="463.97385620915037" y1="273.40822502833976" x2="471.97385620915037" y2="273.40822502833976" stroke="black" stroke-width="1.5"/>
+<circle cx="467.97385620915037" cy="267.1207716630654" r="4" fill="blue" stroke="black" stroke-width="1"/>
+<line x1="546.40522875817" y1="224.56686604991353" x2="546.40522875817" y2="275.6206905939531" stroke="black" stroke-width="1.5"/>
+<line x1="542.40522875817" y1="224.56686604991353" x2="550.40522875817" y2="224.56686604991353" stroke="black" stroke-width="1.5"/>
+<line x1="542.40522875817" y1="275.6206905939531" x2="550.40522875817" y2="275.6206905939531" stroke="black" stroke-width="1.5"/>
+<circle cx="546.40522875817" cy="250.09377832193337" r="4" fill="blue" stroke="black" stroke-width="1"/>
+<line x1="562.0915032679738" y1="268.6905057423053" x2="562.0915032679738" y2="292.81571030030693" stroke="black" stroke-width="1.5"/>
+<line x1="558.0915032679738" y1="268.6905057423053" x2="566.0915032679738" y2="268.6905057423053" stroke="black" stroke-width="1.5"/>
+<line x1="558.0915032679738" y1="292.81571030030693" x2="566.0915032679738" y2="292.81571030030693" stroke="black" stroke-width="1.5"/>
+<circle cx="562.0915032679738" cy="280.7531080213061" r="4" fill="blue" stroke="black" stroke-width="1"/>
+<line x1="666.6666666666667" y1="199.6193225228538" x2="666.6666666666667" y2="244.70887453889986" stroke="black" stroke-width="1.5"/>
+<line x1="662.6666666666667" y1="199.6193225228538" x2="670.6666666666667" y2="199.6193225228538" stroke="black" stroke-width="1.5"/>
+<line x1="662.6666666666667" y1="244.70887453889986" x2="670.6666666666667" y2="244.70887453889986" stroke="black" stroke-width="1.5"/>
+<circle cx="666.6666666666667" cy="222.16409853087686" r="4" fill="blue" stroke="black" stroke-width="1"/>
+</svg>

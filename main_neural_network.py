@@ -12,25 +12,33 @@ import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend for headless plotting
 import matplotlib.pyplot as plt
 import seaborn as sns
+import time
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix, precision_recall_curve
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.tree import plot_tree
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
-from torch.nn.utils.rnn import pad_sequence
 import warnings
 warnings.filterwarnings('ignore')
 
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.naive_bayes import GaussianNB
-from data_augmentation import generate_synthetic_data, augment_real_data
 
 # Create results directory
 RESULTS_DIR = "neural_network_results"
 os.makedirs(RESULTS_DIR, exist_ok=True)
+
+# RandomForest visualization controls
+SAVE_RANDOM_FOREST_TREE_PLOT = True
+RANDOM_FOREST_TREE_INDEX = 0
+RANDOM_FOREST_TREE_MAX_DEPTH = 3  # limit depth for readability; set to None for full tree
+RANDOM_FOREST_ANNOTATE_SAMPLE = True
+CLASS_LABELS_DEFAULT = ['No Crack', 'Small', 'Medium', 'Large']
 
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -246,11 +254,8 @@ def load_and_preprocess_data(data_dir="./", prediction_horizon=5, allow_syntheti
     
     if not csv_files:
         print("No merged CSV files found.")
-        if allow_synthetic_fallback:
-            print("Using synthetic data for demonstration.")
-            return generate_synthetic_data()
-        else:
-            return []
+        print("Synthetic fallback disabled; provide real merged CSV files.")
+        return []
     
     print(f"Found {len(csv_files)} CSV files")
     
@@ -342,10 +347,8 @@ def load_and_preprocess_data(data_dir="./", prediction_horizon=5, allow_syntheti
     if not all_data:
         print("No valid data found in CSV files.")
         if allow_synthetic_fallback:
-            print("Using synthetic data.")
-            return generate_synthetic_data()
-        else:
-            return []
+            print("Synthetic fallback disabled; provide real merged CSV files.")
+        return []
     
     return all_data
 
@@ -428,6 +431,69 @@ def normalize_features(sequences):
         normalized_sequences.append(normalized_seq)
     
     return normalized_sequences, scaler
+
+def build_sequence_feature_names(sequence_length):
+    """Construct feature names matching the flattened sequence layout used by scikit-learn models."""
+    base_feature_names = [
+        'WL_ch2',
+        'WL_ch2_std',
+        'delta_wl_ch2',
+        'Force',
+        'Displacement',
+        'Air_Pressure',
+        'delta_wl_rate',
+        'delta_disp_rate',
+        'is_small_sample'
+    ]
+
+    feature_names = []
+    for step_idx in range(sequence_length):
+        for feature_name in base_feature_names:
+            feature_names.append(f"t{step_idx:02d}_{feature_name}")
+
+    return feature_names
+
+def get_class_labels(class_indices):
+    """Return human-readable class labels corresponding to integer class indices."""
+    labels = []
+    for idx in class_indices:
+        if 0 <= idx < len(CLASS_LABELS_DEFAULT):
+            labels.append(CLASS_LABELS_DEFAULT[idx])
+        else:
+            labels.append(f'Class {idx}')
+    return labels
+
+def save_random_forest_tree(model, feature_names, class_labels, tree_index=0, max_depth=None, annotate_sample=True):
+    """Save a visualization of a single decision tree from a trained RandomForest model."""
+    if not hasattr(model, 'estimators_') or len(model.estimators_) == 0:
+        print('RandomForest model has no estimators to visualize.')
+        return
+
+    if tree_index < 0 or tree_index >= len(model.estimators_):
+        print(f'Requested tree_index {tree_index} is out of range. Using tree_index=0 instead.')
+        tree_index = 0
+
+    estimator = model.estimators_[tree_index]
+
+    plt.figure(figsize=(24, 16))
+    plot_tree(
+        estimator,
+        feature_names=feature_names,
+        class_names=class_labels,
+        filled=True,
+        rounded=True,
+        impurity=False,
+        label='none',
+        max_depth=2,
+        fontsize=20
+    )
+    plt.tight_layout()
+
+    tree_filename = f'RandomForest_tree_{tree_index}.png'
+    output_path = os.path.join(RESULTS_DIR, tree_filename)
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Saved RandomForest tree visualization to {output_path}")
 
 def train_model(model, train_loader, val_loader, num_epochs=50, learning_rate=0.001):
     """Train a neural network model with early stopping"""
@@ -643,6 +709,26 @@ def evaluate_sklearn_model(model, X_test, y_test, model_name, class_names=None, 
     
     return list(all_predictions), all_labels, all_probabilities, overall_accuracy
 
+def maybe_visualize_random_forest_tree(model, sequence_length, class_names):
+    """Optionally save a tree visualization from a trained RandomForest model."""
+    if not SAVE_RANDOM_FOREST_TREE_PLOT:
+        return
+
+    feature_names = build_sequence_feature_names(sequence_length)
+    if class_names is None:
+        class_labels = CLASS_LABELS_DEFAULT
+    else:
+        class_labels = class_names
+
+    save_random_forest_tree(
+        model,
+        feature_names=feature_names,
+        class_labels=class_labels,
+        tree_index=RANDOM_FOREST_TREE_INDEX,
+        max_depth=RANDOM_FOREST_TREE_MAX_DEPTH,
+        annotate_sample=RANDOM_FOREST_ANNOTATE_SAMPLE
+    )
+
 def plot_training_history(train_losses, val_losses, model_name):
     """Plot training and validation loss curves"""
     
@@ -742,34 +828,12 @@ def main(training_data_percentage=100, augment_with_synthetic=True, num_syntheti
     original_y_train = list(y_train)
 
     # Augment real training data
-    if augment_real and original_X_train:
-        # Note: augment_real_data expects un-normalized data, but for simplicity here we augment normalized data.
-        # A more rigorous approach would be to augment first, then normalize all training data together.
-        augmented_real = augment_real_data([{'sequence': seq, 'crack_label': lbl} for seq, lbl in zip(original_X_train, original_y_train)],
-                                           augmentation_factor=real_augmentation_factor)
-        
-        # Extract sequences and labels from augmented data
-        X_train_augmented_real = [item['sequence'] for item in augmented_real]
-        y_train_augmented_real = [item['crack_label'] for item in augmented_real]
-        
-        X_train.extend(X_train_augmented_real)
-        y_train.extend(y_train_augmented_real)
-        print(f"  - Added {len(X_train_augmented_real)} augmented real samples to training set.")
+    if augment_real:
+        print("  - Real data augmentation skipped because augmentation utilities were removed.")
 
     # Generate and add synthetic data
     if augment_with_synthetic:
-        synthetic_data = generate_synthetic_data(num_samples=num_synthetic_samples, sequence_length=sequence_length)
-        
-        # Create sequences and labels from synthetic data
-        X_synthetic, y_synthetic = create_sequences_and_labels(synthetic_data, sequence_length=sequence_length)
-        
-        if X_synthetic:
-            # Normalize synthetic data with the SAME scaler from training data
-            X_synthetic = [scaler.transform(seq) for seq in X_synthetic]
-            
-            X_train.extend(X_synthetic)
-            y_train.extend(y_synthetic)
-            print(f"  - Added {len(X_synthetic)} synthetic samples to training set.")
+        print("  - Synthetic augmentation skipped because synthetic utilities were removed.")
     
     print(f"Total training samples after augmentation: {len(X_train)}")
     
@@ -820,6 +884,7 @@ def main(training_data_percentage=100, augment_with_synthetic=True, num_syntheti
     num_classes = 4  # 0, 1, 2, 3
     
     models = {
+        'RandomForest': RandomForestClassifier(n_estimators=200, random_state=42, n_jobs=-1),
         #'GRU': GRUModel(input_size=input_size, num_classes=num_classes),
         #'LSTM': LSTMModel(input_size=input_size, num_classes=num_classes),
         #'CNN_GRU': CNNGRUModel(input_size=input_size, num_classes=num_classes),
@@ -838,20 +903,36 @@ def main(training_data_percentage=100, augment_with_synthetic=True, num_syntheti
         print(f"Processing {model_name} Model")
         print(f"{'='*60}")
 
-        if isinstance(model, (KNeighborsClassifier, GaussianNB)):
+        total_time = 0
+
+        if isinstance(model, (KNeighborsClassifier, GaussianNB, RandomForestClassifier)):
             print(f"Fitting {model_name} model...")
             X_train_flat = np.array(X_train).reshape(len(X_train), -1)
+            
+            fit_start_time = time.time()
             model.fit(X_train_flat, y_train)
-            print(f"{model_name} model fitted.")
+            fit_time = time.time() - fit_start_time
+            print(f"{model_name} model fitted in {fit_time:.2f} seconds.")
             
             # Evaluate model
+            eval_start_time = time.time()
             predictions, true_labels, probabilities, test_accuracy = evaluate_sklearn_model(
                 model, X_test, y_test, model_name, 
                 training_percentage=training_data_percentage
             )
+            eval_time = time.time() - eval_start_time
+            total_time = fit_time + eval_time
+            
+            print(f"Evaluation for {model_name} completed in {eval_time:.2f} seconds.")
+
+            if model_name == 'RandomForest':
+                maybe_visualize_random_forest_tree(model, sequence_length, CLASS_LABELS_DEFAULT)
         else: # PyTorch models
             # Train model
+            train_start_time = time.time()
             train_losses, val_losses = train_model(model, train_loader, val_loader)
+            train_time = time.time() - train_start_time
+            print(f"Training for {model_name} completed in {train_time:.2f} seconds.")
             plot_training_history(train_losses, val_losses, model_name)
             
             # Load best model
@@ -859,7 +940,15 @@ def main(training_data_percentage=100, augment_with_synthetic=True, num_syntheti
             model = model.to(device)
             
             # Evaluate model
+            eval_start_time = time.time()
             predictions, true_labels, probabilities, test_accuracy = evaluate_model(model, test_loader, training_percentage=training_data_percentage)
+            eval_time = time.time() - eval_start_time
+            total_time = train_time + eval_time
+            print(f"Evaluation for {model_name} completed in {eval_time:.2f} seconds.")
+            
+        print(f"\n{model_name} - Final Summary:")
+        print(f"  - Test Accuracy: {test_accuracy:.2f}%")
+        print(f"  - Total Time (Training + Evaluation): {total_time:.2f} seconds")
         
         results[model_name] = {
             'model': model,
