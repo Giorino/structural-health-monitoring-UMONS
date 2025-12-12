@@ -149,5 +149,11 @@ def main():
     save_model(best_model, 'pycaret_best_model')
     print("Best model saved as pycaret_best_model.pkl")
 
+    print("\n" + "="*80)
+    print("DETAILED 10-FOLD BREAKDOWN (Standard Deviation Calculation)")
+    print("="*80)
+    # create_model prints the 10-fold grid by default
+    rf = create_model('rf')
+
 if __name__ == "__main__":
     main()
