@@ -890,7 +890,7 @@ def main(training_data_percentage=100, augment_with_synthetic=True, num_syntheti
         #'CNN_GRU': CNNGRUModel(input_size=input_size, num_classes=num_classes),
         #'Transformer': TransformerModel(input_size=input_size, num_classes=num_classes),
         'KNN': KNeighborsClassifier(n_neighbors=5, n_jobs=-1),
-        'Bayesian': GaussianNB(),
+        #'Bayesian': GaussianNB(),
         'CNN': CNNModel(input_size=input_size, num_classes=num_classes)
         
     }
