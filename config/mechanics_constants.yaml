@@ -1,0 +1,29 @@
+version: "2026-06-08"
+material:
+  youngs_modulus_gpa: 18.6
+  youngs_modulus_gpa_low: 16.0
+  youngs_modulus_gpa_high: 22.0
+  photoelastic_coefficient: 0.22
+  strain_sensitivity_pm_per_microstrain: 1.2
+geometry:
+  beam_width_mm: 34.0
+  nominal_thickness_12_layers_mm: 4.0
+  layer_thickness_mm: 0.3333333333
+  fbg_layers_below_top_surface: 2
+  default_small_sample_width_mm: 34.0
+  default_y_fbg_mm_override: null
+dataset:
+  repetitions_per_group: 10
+  preferred_channels: 3
+  resampled_window_length: 64
+  min_segment_length: 5
+  default_smooth_kernel: 7
+  default_peak_prominence: 0.1
+equations:
+  expected_strain_microstrain: "epsilon = (P * L * y) / (4 * E * I) * 1e6"
+  bending_moment_n_mm: "M = F * L / 4"
+  observed_strain_microstrain_from_photoelasticity: "epsilon = (delta_lambda / (lambda0 * (1 - pe))) * 1e6"
+  observed_strain_microstrain_from_sensitivity: "epsilon = delta_lambda_nm * 1000 / strain_sensitivity_pm_per_microstrain"
+notes:
+  - "This file is the single source of truth for the rebuilt Sensors revision pipeline."
+  - "Mechanics-derived features remain approximate covariates and must be reported with their assumptions."
