@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducible training and fold results.")
     parser.add_argument(
         "--feature-set",
-        choices=["full", "shape_loading", "shape_only", "mechanics_core", "mechanics_plus"],
+        choices=["full", "shape_loading", "shape_only", "mechanics_core", "mechanics_plus", "full_euler_residual"],
         default="full",
         help="Feature preset for ablations. Mechanics presets append Euler-Bernoulli-driven terms.",
     )
@@ -118,6 +118,22 @@ def get_feature_columns(feature_set: str) -> List[str]:
             "specimen_thickness_mm",
             "specimen_width_mm",
             "number_of_layers",
+            "is_small_sample",
+        ]
+    if feature_set == "full_euler_residual":
+        return [
+            "wl2_median",
+            "wl2_std",
+            "delta_wl_ch2",
+            "force_N",
+            "displacement_mm",
+            "air_pressure_bar",
+            "delta_wl_rate",
+            "delta_disp_rate",
+            "expected_elastic_strain_microstrain",
+            "observed_strain_microstrain_sensitivity",
+            "mechanics_residual_normalized",
+            "mechanics_residual_change_from_baseline",
             "is_small_sample",
         ]
     return [
