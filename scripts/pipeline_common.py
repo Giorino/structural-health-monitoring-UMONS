@@ -121,12 +121,14 @@ def find_latest_existing_output() -> Optional[Path]:
     return candidates[-1] if candidates else None
 
 
-def list_raw_files() -> List[Path]:
-    return sorted((ROOT / "interrogator-data").glob("*-interrogator.txt"))
+def list_raw_files(raw_dir: Optional[Path] = None) -> List[Path]:
+    base_dir = raw_dir if raw_dir is not None else ROOT / "interrogator-data"
+    return sorted(base_dir.glob("*-interrogator.txt"))
 
 
-def load_excel_workbook() -> Dict[str, pd.DataFrame]:
-    workbook = pd.ExcelFile(ROOT / "source" / "data.xlsx")
+def load_excel_workbook(workbook_path: Optional[Path] = None) -> Dict[str, pd.DataFrame]:
+    excel_path = workbook_path if workbook_path is not None else ROOT / "source" / "data.xlsx"
+    workbook = pd.ExcelFile(excel_path)
     sheets: Dict[str, pd.DataFrame] = {}
     for sheet_name in workbook.sheet_names:
         df = pd.read_excel(workbook, sheet_name=sheet_name)
@@ -404,11 +406,25 @@ def resample_segment(values: np.ndarray, target_length: int) -> np.ndarray:
 
 
 def compute_binary_metrics(y_true: np.ndarray, y_pred: np.ndarray, y_score: Optional[np.ndarray] = None) -> Dict[str, float]:
+    y_true = np.asarray(y_true, dtype=int)
+    y_pred = np.asarray(y_pred, dtype=int)
+    positives = y_true == 1
+    negatives = y_true == 0
+    tpr = float((y_pred[positives] == 1).mean()) if positives.any() else 0.0
+    tnr = float((y_pred[negatives] == 0).mean()) if negatives.any() else 0.0
+    if positives.any() and negatives.any():
+        balanced_accuracy = 0.5 * (tpr + tnr)
+    elif positives.any():
+        balanced_accuracy = tpr
+    elif negatives.any():
+        balanced_accuracy = tnr
+    else:
+        balanced_accuracy = np.nan
     metrics = {
         "precision": float(precision_score(y_true, y_pred, zero_division=0)),
         "recall": float(recall_score(y_true, y_pred, zero_division=0)),
         "f1": float(f1_score(y_true, y_pred, zero_division=0)),
-        "balanced_accuracy": float(balanced_accuracy_score(y_true, y_pred)),
+        "balanced_accuracy": float(balanced_accuracy),
     }
     if y_score is not None and len(np.unique(y_true)) > 1:
         finite_mask = np.isfinite(y_score)

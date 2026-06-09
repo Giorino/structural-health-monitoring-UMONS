@@ -34,6 +34,9 @@ from pipeline_common import (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build enriched per-run FBG datasets for grouped evaluation.")
     parser.add_argument("--output-dir", type=str, default=None, help="Optional explicit output directory.")
+    parser.add_argument("--dataset-root", type=str, default=None, help="Optional dataset root containing 'interrogator-data' and 'hand-held-data'.")
+    parser.add_argument("--raw-dir", type=str, default=None, help="Optional explicit interrogator-data directory.")
+    parser.add_argument("--workbook-path", type=str, default=None, help="Optional explicit Excel workbook path.")
     parser.add_argument("--reuse-current-merged-boundaries", action="store_true", help="Reuse segment boundaries from the latest merged CSVs when available.")
     return parser.parse_args()
 
@@ -154,6 +157,8 @@ def build_run_rows(
     raw_original_segments: List[np.ndarray] = []
     raw_resampled_segments: List[np.ndarray] = []
     raw_time_segments: List[np.ndarray] = []
+    raw_loading_segments: List[np.ndarray] = []
+    raw_resampled_loading_segments: List[np.ndarray] = []
 
     run_geometry = parse_geometry_from_run(run_key, safe_float(meta_df.iloc[0].get("Layers (#)")), constants)
     span_mm = safe_float(meta_df.iloc[0].get("Distance (cm)")) * 10.0
@@ -348,12 +353,29 @@ def build_run_rows(
         row["mechanics_residual_normalized"] = mechanics_residual / max(abs(expected_strain_microstrain), 1e-6) if not np.isnan(mechanics_residual) and not np.isnan(expected_strain_microstrain) else np.nan
         row["estimated_strain_per_force_level"] = expected_strain_microstrain / max(force_n, 1e-6) if not np.isnan(expected_strain_microstrain) and not np.isnan(force_n) else np.nan
 
+        loading_trace = np.vstack(
+            [
+                np.full(len(segment_df), air_pressure_bar, dtype=float),
+                np.full(len(segment_df), force_n, dtype=float),
+                np.full(len(segment_df), displacement_mm, dtype=float),
+                np.full(len(segment_df), expected_strain_microstrain, dtype=float),
+            ]
+        )
+        resampled_loading_trace = np.vstack(
+            [
+                resample_segment(loading_trace[channel_idx], target_length)
+                for channel_idx in range(loading_trace.shape[0])
+            ]
+        )
+
         raw_segment_id = f"{source_run_id}__g{group_idx:02d}__r{repetition_idx:02d}"
         row["raw_segment_id"] = raw_segment_id
         raw_segment_ids.append(raw_segment_id)
         raw_original_segments.append(segment_cube)
         raw_resampled_segments.append(resampled_cube)
         raw_time_segments.append(time_values.astype(float))
+        raw_loading_segments.append(loading_trace)
+        raw_resampled_loading_segments.append(resampled_loading_trace)
         rows.append(row)
 
     run_df = pd.DataFrame(rows)
@@ -367,12 +389,26 @@ def build_run_rows(
         original_object[idx] = value
     for idx, value in enumerate(raw_time_segments):
         time_object[idx] = value
+    loading_object = np.empty(len(raw_loading_segments), dtype=object)
+    for idx, value in enumerate(raw_loading_segments):
+        loading_object[idx] = value
 
     raw_payload = {
         "raw_segment_ids": np.asarray(raw_segment_ids, dtype=object),
         "original_segments": original_object,
         "resampled_segments": np.stack(raw_resampled_segments),
         "time_segments": time_object,
+        "loading_segments": loading_object,
+        "resampled_loading_segments": np.stack(raw_resampled_loading_segments),
+        "loading_trace_names": np.asarray(
+            [
+                "air_pressure_bar",
+                "force_N",
+                "displacement_mm",
+                "expected_elastic_strain_microstrain",
+            ],
+            dtype=object,
+        ),
         "channel_names": np.asarray(wl_cols, dtype=object),
     }
     run_meta = {
@@ -476,7 +512,14 @@ def scalar_feature_sets(df: pd.DataFrame) -> Dict[str, List[str]]:
     }
 
 
-def save_dataset_variants(output_dir: Path, all_rows: pd.DataFrame, all_resampled: np.ndarray, mechanics_columns: Sequence[str]) -> Dict[str, object]:
+def save_dataset_variants(
+    output_dir: Path,
+    all_rows: pd.DataFrame,
+    all_resampled: np.ndarray,
+    all_resampled_loading: np.ndarray,
+    loading_trace_names: Sequence[str],
+    mechanics_columns: Sequence[str],
+) -> Dict[str, object]:
     datasets_dir = ensure_dir(output_dir / "datasets")
     registry: Dict[str, object] = {}
     scalar_sets = scalar_feature_sets(all_rows)
@@ -535,6 +578,29 @@ def save_dataset_variants(output_dir: Path, all_rows: pd.DataFrame, all_resample
         "channels": 3,
         "sequence_length": int(all_resampled.shape[-1]),
         "scalar_feature_names": list(mechanics_columns),
+    }
+
+    raw_loading_manifest_path = datasets_dir / "dataset_G_raw_window_tensor_plus_loading_traces_manifest.csv"
+    raw_manifest.to_csv(raw_loading_manifest_path, index=False)
+    raw_loading_npz_path = datasets_dir / "dataset_G_raw_window_tensor_plus_loading_traces.npz"
+    np.savez_compressed(
+        raw_loading_npz_path,
+        X_raw=all_resampled,
+        X_loading=all_resampled_loading,
+        y=all_rows["label_damage_transition"].to_numpy(dtype=int),
+        groups=all_rows["source_run_id"].to_numpy(dtype=object),
+        raw_segment_id=all_rows["raw_segment_id"].to_numpy(dtype=object),
+        loading_trace_names=np.asarray(list(loading_trace_names), dtype=object),
+    )
+    registry["dataset_G_raw_window_tensor_plus_loading_traces"] = {
+        "type": "raw_plus_loading_trace",
+        "path": str(raw_loading_npz_path),
+        "manifest_path": str(raw_loading_manifest_path),
+        "group_column": "source_run_id",
+        "target_column": "label_damage_transition",
+        "channels": int(all_resampled.shape[1]),
+        "loading_trace_channels": list(loading_trace_names),
+        "sequence_length": int(all_resampled.shape[-1]),
     }
     return registry
 
@@ -673,15 +739,26 @@ def main() -> None:
     ensure_dir(output_dir / "runs")
     ensure_dir(output_dir / "raw_segments")
 
-    workbook = load_excel_workbook()
+    dataset_root = Path(args.dataset_root) if args.dataset_root else None
+    workbook_path = Path(args.workbook_path) if args.workbook_path else (dataset_root / "hand-held-data" / "data.xlsx" if dataset_root else None)
+    raw_dir = Path(args.raw_dir) if args.raw_dir else (dataset_root / "interrogator-data" if dataset_root else None)
+
+    workbook = load_excel_workbook(workbook_path=workbook_path)
     sheet_lookup = map_sheet_keys(workbook.keys())
     merged_index = load_current_merged_index() if args.reuse_current_merged_boundaries else {}
-    raw_files = list_raw_files()
+    raw_files = list_raw_files(raw_dir=raw_dir)
 
     run_frames: List[pd.DataFrame] = []
     run_manifests: List[Dict[str, object]] = []
     unmatched_rows: List[Dict[str, object]] = []
     resampled_segments_all: List[np.ndarray] = []
+    resampled_loading_segments_all: List[np.ndarray] = []
+    loading_trace_names = [
+        "air_pressure_bar",
+        "force_N",
+        "displacement_mm",
+        "expected_elastic_strain_microstrain",
+    ]
     mechanics_columns = [
         "expected_elastic_strain_microstrain",
         "observed_strain_microstrain_photoelastic",
@@ -743,6 +820,7 @@ def main() -> None:
         run_manifests.append(run_meta)
         run_frames.append(run_df)
         resampled_segments_all.append(raw_payload["resampled_segments"])
+        resampled_loading_segments_all.append(raw_payload["resampled_loading_segments"])
 
     if not run_frames:
         raise RuntimeError("No enriched runs were created.")
@@ -753,7 +831,15 @@ def main() -> None:
     all_rows.to_csv(aggregated_csv_path, index=False)
 
     all_resampled = np.concatenate(resampled_segments_all, axis=0)
-    dataset_registry = save_dataset_variants(output_dir, all_rows, all_resampled, mechanics_columns)
+    all_resampled_loading = np.concatenate(resampled_loading_segments_all, axis=0)
+    dataset_registry = save_dataset_variants(
+        output_dir,
+        all_rows,
+        all_resampled,
+        all_resampled_loading,
+        loading_trace_names,
+        mechanics_columns,
+    )
     data_dictionary = build_data_dictionary()
     data_dictionary_path = output_dir / "data_dictionary.csv"
     data_dictionary.to_csv(data_dictionary_path, index=False, quoting=csv.QUOTE_MINIMAL)
@@ -774,6 +860,9 @@ def main() -> None:
     metadata = {
         "created_at": datetime.now().isoformat(),
         "constants": constants,
+        "dataset_root": str(dataset_root) if dataset_root else None,
+        "workbook_path": str(workbook_path) if workbook_path else str(ROOT / "source" / "data.xlsx"),
+        "raw_dir": str(raw_dir) if raw_dir else str(ROOT / "interrogator-data"),
         "aggregated_csv_path": str(aggregated_csv_path),
         "run_manifest": run_manifests,
         "dataset_registry": dataset_registry,
