@@ -202,7 +202,7 @@ The main evaluation was performed with strict leave-one-run-out validation on th
 \textbf{Evaluation Level} & \textbf{Precision} & \textbf{Recall} & \textbf{$F_1$} & \textbf{Balanced Accuracy} \\
 \midrule
 Window level & 0.900 & 0.910 & 0.905 & 0.942 \\
-Run level (aggregated) & 0.833 & 1.000 & 0.909 & 0.969 \\
+Run level & 0.833 & 1.000 & 0.909 & 0.969 \\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -236,8 +236,6 @@ Mechanics plays a practical role in the present study by structuring the detecti
 The retained architecture is deliberately compact. Rather than relying on a heavy network, the present framework obtains its performance from the joint use of synchronized optical and mechanical descriptors, strict grouped evaluation, and a sequence model that is easy to reproduce. This simplicity is an advantage for reproducibility and makes the method straightforward to transfer to future experimental campaigns with richer sensor layouts or larger cohorts.
 
 The added uncertainty analysis sharpens the interpretation of the reported scores. Because the bootstrap resampling was performed over runs rather than over windows, the confidence intervals are tied to the independent experimental units of the campaign. The resulting intervals confirm that the retained operating point is not an artifact of pooled window counting.
-
-An independent external validation dataset collected from a separate fabrication batch or test campaign was not available for the current study. The present evidence should therefore be interpreted as a grouped within-campaign validation of a compact physics-guided detector. Within that scope, the combination of run-bootstrap uncertainty reporting and dual window-level/run-level reporting provides a transparent basis for judging performance.
 
 \section{Conclusions}
 
