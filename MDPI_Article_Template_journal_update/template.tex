@@ -219,7 +219,8 @@ To isolate the effect of the mechanics-guided terms, we compared the selected 13
 
 \begin{table}[H]
 \caption{Effect of adding Euler--Bernoulli-derived features. Thresholds were tuned separately for each model on the grouped validation outputs.\label{tab:physics_effect}}
-\begin{tabularx}{\textwidth}{XlCCCC}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}>{\raggedright\arraybackslash}p{0.30\textwidth}lcccc}
 \toprule
 \textbf{Model} & \textbf{Level} & \textbf{Precision} & \textbf{Recall} & \textbf{$F_1$} & \textbf{Balanced Accuracy} \\
 \midrule
@@ -228,7 +229,7 @@ Without Euler--Bernoulli features & Run & 0.824 & 0.933 & 0.875 & 0.936 \\
 With Euler--Bernoulli features & Window & 0.900 & 0.909 & 0.905 & 0.942 \\
 With Euler--Bernoulli features & Run & 0.833 & 1.000 & 0.909 & 0.969 \\
 \bottomrule
-\end{tabularx}
+\end{tabular*}
 \end{table}
 
 The optical-loading model without Euler--Bernoulli features already performed strongly at window level. However, the addition of the mechanics-guided descriptors produced the stronger run-level screening point, lifting run-level recall from 0.933 to 1.000 and run-level $F_1$ from 0.875 to 0.909. In the present study, the principal benefit of the physics terms was therefore not a universal increase in every window-level metric, but a more reliable experiment-level screening behavior with no missed crack-positive runs.
