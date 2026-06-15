@@ -264,7 +264,9 @@ The bootstrap confidence intervals sharpen the interpretation of the reported sc
 
 \section{Conclusions}
 
-This study demonstrates that a compact CNN, combined with Euler--Bernoulli-guided strain interpretation, can detect crack-associated events effectively from multiplexed FBG interrogator measurements. On strict leave-one-run-out evaluation, the selected physics-guided operating point reached window-level precision of 0.900, recall of 0.910, $F_1$ of 0.905, and balanced accuracy of 0.942, while the corresponding run-level decision reached precision of 0.833, recall of 1.000, $F_1$ of 0.909, and balanced accuracy of 0.969. The resulting framework is simple, physically grounded, and well suited to crack-event screening in composite SHM experiments.
+This study demonstrates that a compact CNN, combined with Euler--Bernoulli-guided strain interpretation, can detect crack-associated events effectively from multiplexed FBG interrogator measurements. On strict leave-one-run-out evaluation, the selected physics-guided operating point reached window-level precision of 0.900, recall of 0.910, $F_1$ of 0.905, and balanced accuracy of 0.942, while the corresponding run-level decision reached precision of 0.833, recall of 1.000, $F_1$ of 0.909, and balanced accuracy of 0.969. These results show that synchronized loading information and simple mechanics-guided residual features can strengthen crack-event screening without requiring a heavy architecture.
+
+Future work should now test the framework on independent fabrication campaigns and broader specimen geometries to assess generalization beyond the present within-campaign dataset. It would also be valuable to extend the approach to richer sensing layouts, including additional embedded FBG channels and more variable operating conditions, in order to evaluate the robustness of the mechanics-guided descriptors in less controlled settings. Finally, the present binary screening formulation could be expanded toward earlier crack-onset warning, sensor-level localization, and eventual damage-severity estimation, which would move the method closer to practical SHM deployment.
 
 \authorcontributions{Conceptualization, A.U. and C.C.; methodology, A.U., A.G. and C.C.; software, A.U.; validation, A.U. and A.G.; formal analysis, A.U.; investigation, A.U., E.N., T.T. and K.C.; resources, C.C. and K.Y.; data curation, A.U., E.N. and T.T.; writing---original draft preparation, A.U. and C.C.; writing---review and editing, A.U., A.G., E.N., T.T., K.Y., K.C. and C.C.; visualization, A.U.; supervision, A.G., K.Y. and C.C.; funding acquisition, C.C. All authors have read and agreed to the published version of the manuscript.}
 
@@ -280,6 +282,7 @@ This study demonstrates that a compact CNN, combined with Euler--Bernoulli-guide
 
 \conflictsofinterest{The authors declare no conflicts of interest. The funders had no role in the design of the study; in the collection, analyses, or interpretation of data; in the writing of the manuscript; or in the decision to publish the results.}
 
+\vspace{1cm}
 \abbreviations{Abbreviations}{
 \noindent
 \begin{tabular}{@{}ll}
